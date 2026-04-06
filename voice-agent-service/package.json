@@ -1,0 +1,23 @@
+{
+  "name": "voice-agent-service",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22 <26"
+  },
+  "scripts": {
+    "start": "node src/main.js start",
+    "dev": "node src/main.js dev",
+    "download-files": "node src/main.js download-files",
+    "test": "node --test"
+  },
+  "dependencies": {
+    "@livekit/agents": "^1.0.46",
+    "@livekit/agents-plugin-bey": "^1.0.46",
+    "@livekit/agents-plugin-deepgram": "^1.0.46",
+    "@livekit/noise-cancellation-node": "^0.1.9",
+    "dotenv": "^17.3.1",
+    "express": "^5.2.1"
+  }
+}
