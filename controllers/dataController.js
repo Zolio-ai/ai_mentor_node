@@ -18,3 +18,12 @@ exports.getProfile = asyncHandler(async (req, res) => {
     const profile = await dataService.getFullProfile(studentId);
     res.status(200).json({ success: true, data: profile });
 });
+
+// @desc Get only marks10th and mark12th
+// @route GET /api/data/marks
+// @access Private
+exports.getMarks = asyncHandler(async (req, res) => {
+    const studentId = req.user.id;
+    const marks = await dataService.getMarks(studentId);
+    res.status(200).json({ success: true, data: marks });
+});

@@ -9,4 +9,7 @@ router.post('/onboarding', protect, dataController.saveStudentData);
 // Full Profile (Identity + Academic)
 router.get('/profile', protect, dataController.getProfile);
 
+// Fetch only marks
+router.get('/marks', protect, dataController.getMarks);
+
 module.exports = router;
