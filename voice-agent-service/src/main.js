@@ -14,6 +14,7 @@ import { AVATAR_ID } from "./config.js";
 import { resolveBeyConfig } from "./avatar-config.js";
 import { startHealthServer } from "./health-server.js";
 import { INITIAL_GREETING } from "./prompts.js";
+import { forwardAssistantChatToRoom } from "./forward-assistant-chat.js";
 
 dotenv.config({ path: ".env.local" });
 dotenv.config();
@@ -39,8 +40,24 @@ export default defineAgent({
         language: "en",
       }),
       allowInterruptions: true,
-      voiceOptions: {
-        preemptiveGeneration: true,
+      // More stable turn-taking for human speech: wait for completed user turn
+      // before generating, reducing split/partial responses.
+      preemptiveGeneration: false,
+      // Slightly shorter away timeout so stalled turns recover sooner.
+      userAwayTimeout: 10,
+      turnHandling: {
+        // User requested slower commit: process after about 4s of silence.
+        endpointing: {
+          mode: "fixed",
+          minDelay: 4000,
+          maxDelay: 4000,
+        },
+        // Avoid false barge-ins when user says brief fillers.
+        interruption: {
+          enabled: true,
+          minDuration: 900,
+          minWords: 2,
+        },
       },
     });
 
@@ -51,12 +68,52 @@ export default defineAgent({
     }
 
     const beyConfig = resolveBeyConfig();
+    const enableBvc =
+      (process.env.VOICE_AGENT_ENABLE_NOISE_CANCELLATION || "false") === "true";
+    const interimFallbackEnabled =
+      (process.env.VOICE_AGENT_ENABLE_INTERIM_FALLBACK || "true") === "true";
+    const interimFallbackMaxAgeMs = Number(
+      process.env.VOICE_AGENT_INTERIM_FALLBACK_MAX_AGE_MS || 20000,
+    );
+    let lastInterimTranscript = "";
+    let lastInterimAtMs = 0;
+
+    session.on(voice.AgentSessionEventTypes.UserInputTranscribed, (ev) => {
+      const transcript = (ev?.transcript || "").trim();
+      if (!transcript) return;
+      if (ev?.isFinal) {
+        console.info(`[STT final] ${transcript}`);
+        lastInterimTranscript = "";
+        lastInterimAtMs = 0;
+        return;
+      }
+      lastInterimTranscript = transcript;
+      lastInterimAtMs = Date.now();
+    });
+
+    session.on(voice.AgentSessionEventTypes.UserStateChanged, (ev) => {
+      if (!interimFallbackEnabled) return;
+      if (ev?.newState !== "away") return;
+      if (!lastInterimTranscript) return;
+      const ageMs = Date.now() - lastInterimAtMs;
+      if (ageMs > interimFallbackMaxAgeMs) return;
+
+      const fallbackText = lastInterimTranscript;
+      lastInterimTranscript = "";
+      lastInterimAtMs = 0;
+      console.warn(
+        `[STT fallback] using interim transcript due to away timeout: "${fallbackText}"`,
+      );
+      session.generateReply({ userInput: fallbackText });
+    });
+
+    forwardAssistantChatToRoom(session, ctx.room);
 
     await session.start({
       agent: new Assistant(),
       room: ctx.room,
       inputOptions: {
-        noiseCancellation: BackgroundVoiceCancellation(),
+        ...(enableBvc ? { noiseCancellation: BackgroundVoiceCancellation() } : {}),
       },
     });
     console.info("Agent voice session started");
