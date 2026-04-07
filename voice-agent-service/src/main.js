@@ -15,10 +15,36 @@ import { resolveBeyConfig } from "./avatar-config.js";
 import { startHealthServer } from "./health-server.js";
 import { INITIAL_GREETING } from "./prompts.js";
 import { forwardAssistantChatToRoom } from "./forward-assistant-chat.js";
+import { SarvamStt } from "./sarvam-stt-livekit.js";
+import { SarvamTts } from "./sarvam-tts-livekit.js";
 
 dotenv.config({ path: ".env.local" });
 dotenv.config();
 startHealthServer();
+
+function normalizeProvider(raw, fallback) {
+  const provider = (raw || fallback).toLowerCase().trim();
+  if (provider === "sarwam") return "sarvam";
+  return provider;
+}
+
+function resolveStt() {
+  const provider = normalizeProvider(process.env.VOICE_AGENT_STT_PROVIDER, "sarvam");
+  console.info(`[voice] STT provider: ${provider}`);
+  if (provider !== "sarvam") {
+    throw new Error(`Unsupported STT provider "${provider}". This service is locked to Sarvam.`);
+  }
+  return new SarvamStt();
+}
+
+function resolveTts() {
+  const provider = normalizeProvider(process.env.VOICE_AGENT_TTS_PROVIDER, "sarvam");
+  console.info(`[voice] TTS provider: ${provider}`);
+  if (provider !== "sarvam") {
+    throw new Error(`Unsupported TTS provider "${provider}". This service is locked to Sarvam.`);
+  }
+  return new SarvamTts();
+}
 
 export default defineAgent({
   entry: async (ctx) => {
@@ -27,18 +53,11 @@ export default defineAgent({
     };
 
     const session = new voice.AgentSession({
-      stt: new inference.STT({
-        model: "deepgram/nova-3",
-        language: "multi",
-      }),
+      stt: resolveStt(),
       llm: new inference.LLM({
-        model: "openai/gpt-4.1-mini",
+        model: process.env.VOICE_AGENT_LLM_MODEL || "openai/gpt-4.1-mini",
       }),
-      tts: new inference.TTS({
-        model: "deepgram/aura-2",
-        voice: "orpheus",
-        language: "en",
-      }),
+      tts: resolveTts(),
       allowInterruptions: true,
       // More stable turn-taking for human speech: wait for completed user turn
       // before generating, reducing split/partial responses.
