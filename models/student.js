@@ -1,6 +1,6 @@
 const mongoose = require('mongoose');
 
-const userSchema = new mongoose.Schema({
+const studentSchema = new mongoose.Schema({
     firstName: {
         type: String,
         required: true,
@@ -23,21 +23,19 @@ const userSchema = new mongoose.Schema({
         required: true,
         trim: true
     },
-    stream: {
-        type: String,
-        required: true,
-        enum: ['jee', 'neet'],
-        lowercase: true,
-        trim: true
-    },
-    class: {
-        type: Number,
-        required: true
-    },
     password: {
         type: String,
         required: true
     }
-}, { timestamps: true });
+}, { 
+    timestamps: true,
+    toJSON: { virtuals: true },
+    toObject: { virtuals: true }
+});
 
-module.exports = mongoose.model('User', userSchema);
+// Create virtual 'id' mapping from '_id'
+studentSchema.virtual('id').get(function() {
+    return this._id.toHexString();
+});
+
+module.exports = mongoose.model('Student', studentSchema);

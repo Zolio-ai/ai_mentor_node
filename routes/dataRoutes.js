@@ -3,8 +3,10 @@ const router = express.Router();
 const dataController = require('../controllers/dataController');
 const { protect } = require('../middlewares/authMiddleware');
 
-// Protect all routes below
-router.post('/store', protect, dataController.saveData);
-router.get('/', protect, dataController.getData);
+// Dashboard / Onboarding routes
+router.post('/onboarding', protect, dataController.saveStudentData);
+
+// Full Profile (Identity + Academic)
+router.get('/profile', protect, dataController.getProfile);
 
 module.exports = router;

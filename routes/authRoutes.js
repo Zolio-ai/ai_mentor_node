@@ -1,10 +1,9 @@
 const express = require('express');
 const router = express.Router();
 const authController = require('../controllers/authController');
-const { protect } = require('../middlewares/authMiddleware');
 
+// Only register and login
 router.post('/register', authController.register);
 router.post('/login', authController.login);
-router.get('/profile', protect, authController.getUserDetails);
 
 module.exports = router;
