@@ -19,7 +19,7 @@ exports.getProfile = asyncHandler(async (req, res) => {
     res.status(200).json({ success: true, data: profile });
 });
 
-// @desc Get only marks10th and mark12th
+// @desc Get only marks
 // @route GET /api/data/marks
 // @access Private
 exports.getMarks = asyncHandler(async (req, res) => {

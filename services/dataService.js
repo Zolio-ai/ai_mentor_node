@@ -2,12 +2,12 @@ const Student = require('../models/student');
 const StudentData = require('../models/studentData');
 
 exports.onboardStudent = async (studentId, academicData) => {
-    const { stream, class: studentClass, cgpa10th, marks10th, cgpa12th, marks12th, entrance } = academicData;
+    const { stream, class: studentClass, cgpa, marks, entrance } = academicData;
 
     // Create or Update student data
     const data = await StudentData.findOneAndUpdate(
         { studentId },
-        { stream, class: studentClass, cgpa10th, marks10th, cgpa12th, marks12th, entrance },
+        { stream, class: studentClass, cgpa, marks, entrance },
         { returnDocument: 'after', upsert: true }
     );
     
@@ -30,7 +30,7 @@ exports.getFullProfile = async (studentId) => {
 };
 
 exports.getMarks = async (studentId) => {
-    const marks = await StudentData.findOne({ studentId}).select('marks10th marks12th');
+    const marks = await StudentData.findOne({ studentId}).select('marks');
     if(!marks) {
         throw new Error('No academic records found for this student');
     }

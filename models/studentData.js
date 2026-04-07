@@ -8,15 +8,8 @@ const studentDataSchema = new mongoose.Schema({
     },
     stream: { type: String, required: true },
     class: { type: Number, required: true },
-    cgpa10th: { type: Number, required: true},
-    marks10th: { 
-        physics: { type: Number, required: true},
-        chemistry: { type: Number, required: true},
-        biology: { type: Number, required: true},
-        maths: { type: Number, required: true}
-    },
-    cgpa12th: { type: Number, required: true},
-    marks12th: { 
+    cgpa: { type: Number},
+    marks: { 
         physics: { type: Number},
         chemistry: { type: Number},
         biology: { type: Number},

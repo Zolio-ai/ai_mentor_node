@@ -68,19 +68,12 @@ These APIs manage academic information and are **Protected** (require JWT token)
     {
       "stream": "Science",
       "class": 12,
-      "cgpa10th": 9.5,
-      "marks10th": {
+      "cgpa": 9.5,
+      "marks": {
         "physics": 90,
         "chemistry": 92,
         "biology": 88,
         "maths": 95
-      },
-      "cgpa12th": 9.2,
-      "marks12th": {
-        "physics": 85,
-        "chemistry": 88,
-        "biology": 90,
-        "maths": 92
       },
       "entrance": {
         "examtype": "JEE"
@@ -96,7 +89,7 @@ These APIs manage academic information and are **Protected** (require JWT token)
 ### 3. Get Only Marks
 *   **URL:** `/api/data/marks`
 *   **Method:** `GET`
-*   **Description:** Returns **only** `marks10th` and `marks12th` objects.
+*   **Description:** Returns **only** the `marks` object.
 
 ---
 
@@ -106,11 +99,9 @@ These APIs manage academic information and are **Protected** (require JWT token)
 | :--- | :--- | :--- |
 | `studentId` | ObjectId | Reference to `Student` model |
 | `stream` | String | e.g., "Science", "Commerce" |
-| `class` | Number | e.g., 10, 12 |
-| `cgpa10th` | Number | Decimal supported |
-| `marks10th` | Object | Includes `physics`, `chemistry`, `biology`, `maths` |
-| `cgpa12th` | Number | Decimal supported |
-| `marks12th` | Object | Includes `physics`, `chemistry`, `biology`, `maths` |
+| `class` | Number | e.g., 10, 11, 12 |
+| `cgpa` | Number | Overall CGPA/Percentage |
+| `marks` | Object | Includes `physics`, `chemistry`, `biology`, `maths` |
 | `entrance` | Object | `examtype` (Enum: 'JEE', 'KEAM', 'NEET') |
 
 ---
@@ -119,4 +110,3 @@ These APIs manage academic information and are **Protected** (require JWT token)
 - **Backend:** Node.js, Express.js
 - **Database:** MongoDB, Mongoose
 - **Authentication:** JWT (JSON Web Tokens)
-- **Security:** Bcrypt for password hashing
