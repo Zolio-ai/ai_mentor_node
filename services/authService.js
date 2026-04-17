@@ -2,8 +2,8 @@ const Student = require('../models/student');
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
 
-exports.registerStudent = async (studentData) => {
-    const { firstName, lastName, email, phonenumber, password } = studentData;
+const registerStudent = async (studentData) => {
+    const { firstName, lastName, email, phonenumber, password, userType } = studentData;
     const normalizedEmail = email.toLowerCase().trim();
     
     // 1. Check if student exists
@@ -19,13 +19,14 @@ exports.registerStudent = async (studentData) => {
         lastName, 
         email: normalizedEmail, 
         phonenumber, 
-        password: hashedPassword
+        password: hashedPassword,
+        userType: userType || 'student'
     });
     
     return student;
 };
 
-exports.loginStudent = async (email, password) => {
+const loginStudent = async (email, password) => {
     const normalizedEmail = email.toLowerCase().trim();
     
     // 1. Find student
@@ -36,11 +37,16 @@ exports.loginStudent = async (email, password) => {
     const isMatch = await bcrypt.compare(password, student.password);
     if (!isMatch) throw new Error('Invalid credentials');
 
-    // 3. Generate Token with userType
+    // 3. Generate Token with the actual userType from DB
     const token = jwt.sign(
-        { id: student._id, userType: 'student' }, 
+        { id: student._id, userType: student.userType }, 
         process.env.JWT_SECRET, 
         { expiresIn: '1d' }
     );
     return { student, token };
+};
+
+module.exports = {
+    registerStudent,
+    loginStudent
 };

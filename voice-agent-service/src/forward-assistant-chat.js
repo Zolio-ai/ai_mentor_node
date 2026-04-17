@@ -11,8 +11,9 @@ import { voice } from "@livekit/agents";
 /**
  * @param {import("@livekit/agents").voice.AgentSession} session
  * @param {{ localParticipant?: { sendText?: (text: string, options?: { topic?: string, attributes?: Record<string, string> }) => Promise<unknown> } }} room
+ * @param {Object} signals - Shared state for attaching signals to next message
  */
-export function forwardAssistantChatToRoom(session, room) {
+export function forwardAssistantChatToRoom(session, room, signals = {}) {
   const { SpeechCreated } = voice.AgentSessionEventTypes;
   const forwardedItemIds = new Set();
 
@@ -28,8 +29,11 @@ export function forwardAssistantChatToRoom(session, room) {
         attributes: {
           assistant_speech_created_at: String(speechCreatedAt ?? Date.now()),
           assistant_speech_id: String(speechId ?? ""),
+          assessment_trigger: signals.pendingAssessmentTopics ? JSON.stringify(signals.pendingAssessmentTopics) : undefined,
         },
       });
+      // Clear signal after sending
+      signals.pendingAssessmentTopics = null;
     } catch (error) {
       console.error("forwardAssistantChatToRoom: sendText failed", error);
     }
@@ -49,8 +53,12 @@ export function forwardAssistantChatToRoom(session, room) {
         if (forwardedItemIds.has(item.id)) {
           continue;
         }
-        const text =
+        let text =
           typeof item.textContent === "string" ? item.textContent.trim() : "";
+          
+        // CLEANUP: Remove any tool call tags that leaked into the transcript (e.g. {{trigger_assessment}})
+        text = text.replace(/\{\{.*?\}\}/g, "").trim();
+
         if (!text) {
           continue;
         }

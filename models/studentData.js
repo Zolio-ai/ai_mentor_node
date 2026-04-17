@@ -18,7 +18,7 @@ const studentDataSchema = new mongoose.Schema({
     entrance: {
         examtype: {
             type: String,
-            enum: ['JEE', 'KEAM', 'NEET']
+            enum: ['JEE', 'NEET']
         }
     }
 }, { timestamps: true });

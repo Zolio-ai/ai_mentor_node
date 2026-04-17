@@ -26,6 +26,11 @@ const studentSchema = new mongoose.Schema({
     password: {
         type: String,
         required: true
+    },
+    userType: {
+        type: String,
+        default: 'student',
+        enum: ['student', 'teacher', 'admin']
     }
 }, { 
     timestamps: true,
