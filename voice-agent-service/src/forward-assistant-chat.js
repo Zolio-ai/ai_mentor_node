@@ -24,13 +24,23 @@ export function forwardAssistantChatToRoom(session, room, signals = {}) {
     }
 
     try {
+      const attributes = {
+        assistant_speech_created_at: String(speechCreatedAt ?? Date.now()),
+        assistant_speech_id: String(speechId ?? ""),
+      };
+
+      if (
+        Array.isArray(signals.pendingAssessmentTopics) &&
+        signals.pendingAssessmentTopics.length > 0
+      ) {
+        attributes.assessment_trigger = JSON.stringify(
+          signals.pendingAssessmentTopics,
+        );
+      }
+
       await lp.sendText(text, {
         topic: "lk.chat",
-        attributes: {
-          assistant_speech_created_at: String(speechCreatedAt ?? Date.now()),
-          assistant_speech_id: String(speechId ?? ""),
-          assessment_trigger: signals.pendingAssessmentTopics ? JSON.stringify(signals.pendingAssessmentTopics) : undefined,
-        },
+        attributes,
       });
       // Clear signal after sending
       signals.pendingAssessmentTopics = null;

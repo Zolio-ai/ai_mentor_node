@@ -394,7 +394,10 @@ export default defineAgent({
     await ctx.connect();
     console.info(`Connected to room: ${ctx.room.name}`);
 
-    // Bridge chat messages to the voice agent
+    // Bridge only explicit custom data actions to the voice agent.
+    // LiveKit session chat (`useSessionMessages().send`) is already handled by
+    // the agent pipeline; re-injecting generic `message`/`text` here causes
+    // duplicate assistant turns.
     ctx.room.on('dataReceived', (payload, participant) => {
       if (participant?.identity === ctx.room.localParticipant.identity) return;
 
@@ -403,11 +406,10 @@ export default defineAgent({
 
       try {
         const data = JSON.parse(rawData);
-        // Handle different possible chat message formats (LiveKit versions vary)
-        const chatText = data.message || data.text;
-        
-        if (chatText && typeof chatText === 'string') {
-          console.info(`[chat] Received from ${participant?.identity}: "${chatText}"`);
+        if (data?.action === "USER_CHAT_MESSAGE" && typeof data?.text === "string") {
+          const chatText = data.text.trim();
+          if (!chatText) return;
+          console.info(`[chat/custom] Received from ${participant?.identity}: "${chatText}"`);
           session.generateReply({ userInput: chatText });
         }
       } catch (e) {
