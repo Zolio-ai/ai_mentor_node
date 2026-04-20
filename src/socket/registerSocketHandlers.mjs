@@ -51,7 +51,7 @@ async function synthesizeTtsWithDeepgram(text, deepgramTtsModel, deepgramApiKey)
 }
 
 export function registerSocketHandlers(io, deps) {
-  const { jwtSecret, openai, openAiModel, deepgramApiKey, deepgramSttModel, deepgramTtsModel } =
+  const { jwtSecret, openai, openAiModel, deepgramApiKey, deepgramSttModel, deepgramTtsModel, ConversationMessage } =
     deps;
 
   io.use((socket, next) => {
@@ -82,6 +82,47 @@ export function registerSocketHandlers(io, deps) {
           "You are a concise, friendly POS assistant for a store cashier. Keep responses short and practical.",
       },
     ];
+    const userId = String(socket.user?.sub || "");
+    const conversationSource = "socket-chat";
+
+    const persistConversationMessage = async (role, text, extra = {}) => {
+      const safeText = String(text || "").trim();
+      if (!userId || !safeText || !ConversationMessage) return;
+      try {
+        await ConversationMessage.create({
+          userId,
+          roomName: "socket-chat",
+          role,
+          text: safeText,
+          speechId: String(extra.speechId || ""),
+          interrupted: Boolean(extra.interrupted),
+          source: conversationSource,
+        });
+      } catch (error) {
+        socket.emit("conversation_error", { message: `Failed to save conversation: ${error.message}` });
+      }
+    };
+
+    const emitConversationHistory = async () => {
+      if (!userId || !ConversationMessage) return;
+      try {
+        const rows = await ConversationMessage.find({ userId })
+          .sort({ createdAt: 1 })
+          .limit(200)
+          .lean();
+        socket.emit("conversation_history", {
+          messages: rows.map((row) => ({
+            id: String(row._id),
+            role: row.role,
+            text: row.text,
+            createdAt: row.createdAt,
+            source: row.source || "voice-agent",
+          })),
+        });
+      } catch (error) {
+        socket.emit("conversation_error", { message: `Failed to load conversation history: ${error.message}` });
+      }
+    };
 
     const stopActiveReply = (reason = "interrupted") => {
       wasInterrupted = true;
@@ -132,6 +173,7 @@ export function registerSocketHandlers(io, deps) {
       currentAiRunId = `run-${Date.now()}`;
       socket.emit("ai_started", { messageId: currentAiMessageId, runId: currentAiRunId });
       conversationHistory.push({ role: "user", content: userText });
+      await persistConversationMessage("user", userText, { speechId: currentAiMessageId });
 
       let aiBuffer = "";
       let fullResponse = "";
@@ -175,6 +217,10 @@ export function registerSocketHandlers(io, deps) {
 
         if (!wasInterrupted) {
           conversationHistory.push({ role: "assistant", content: fullResponse });
+          await persistConversationMessage("assistant", fullResponse, {
+            speechId: currentAiMessageId,
+            interrupted: false,
+          });
           socket.emit("ai_finished", { messageId: currentAiMessageId });
         }
       } catch (error) {
@@ -196,6 +242,7 @@ export function registerSocketHandlers(io, deps) {
       },
       status: "connected",
     });
+    void emitConversationHistory();
 
     socket.on("interrupt", () => {
       stopActiveReply("user_interrupt");

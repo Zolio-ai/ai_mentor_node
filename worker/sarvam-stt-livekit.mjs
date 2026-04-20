@@ -73,7 +73,7 @@ export class SarvamStt extends stt.STT {
       apiKey,
       baseUrl: opts.baseUrl || process.env.SARVAM_API_BASE_URL || DEFAULT_BASE_URL,
       model: opts.model || process.env.SARVAM_STT_MODEL || "saarika:v2.5",
-      languageCode: opts.languageCode || process.env.SARVAM_STT_LANGUAGE || "unknown",
+      languageCode: opts.languageCode || process.env.SARVAM_STT_LANGUAGE || "en-IN",
       sampleRate: Number(opts.sampleRate || process.env.SARVAM_STT_SAMPLE_RATE || 16000),
     };
   }
@@ -103,7 +103,7 @@ class SarvamSpeechStream extends stt.SpeechStream {
   constructor(sttInstance, opts, connOptions) {
     super(sttInstance, opts.sampleRate, connOptions);
     this.#opts = opts;
-    const maxChunkSeconds = Number(process.env.SARVAM_STT_MAX_CHUNK_SECONDS || 20);
+    const maxChunkSeconds = Number(process.env.SARVAM_STT_MAX_CHUNK_SECONDS || 1);
     this.#maxChunkBytes = Math.max(1, Math.floor(opts.sampleRate * 2 * maxChunkSeconds));
   }
 

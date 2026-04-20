@@ -2,7 +2,9 @@ import { ServerOptions, cli, defineAgent, inference, voice } from "@livekit/agen
 import * as bey from "@livekit/agents-plugin-bey";
 import * as deepgram from "@livekit/agents-plugin-deepgram";
 import dotenv from "dotenv";
+import mongoose from "mongoose";
 import { fileURLToPath } from "node:url";
+import { ConversationMessage } from "../src/models/index.mjs";
 import { Assistant } from "./assistant.mjs";
 import { SarvamStt } from "./sarvam-stt-livekit.mjs";
 import { SarvamTts } from "./sarvam-tts-livekit.mjs";
@@ -14,6 +16,12 @@ const livekitLlmModel = process.env.LIVEKIT_LLM_MODEL || "openai/gpt-4o-mini";
 const syncAiTranscription = process.env.LIVEKIT_SYNC_TRANSCRIPTION !== "false";
 const apiBaseUrl = process.env.API_BASE_URL || "http://localhost:4000";
 const internalApiKey = process.env.INTERNAL_API_KEY || process.env.JWT_SECRET || "";
+const endpointingDelayMs = Math.max(300, Number(process.env.VOICE_AGENT_ENDPOINTING_DELAY_MS || 1200));
+const userAwayTimeoutSec = Math.max(20, Number(process.env.VOICE_AGENT_USER_AWAY_TIMEOUT_SECONDS || 45));
+const closeOnDisconnect = process.env.VOICE_AGENT_CLOSE_ON_DISCONNECT === "true";
+const mongoUri = process.env.MONGODB_URI || "";
+const mongoDbName = process.env.MONGODB_DB_NAME || "ai_mentor_app";
+let workerDbConnectPromise = null;
 
 function normalizeProvider(raw, fallback) {
   const provider = String(raw || fallback)
@@ -146,6 +154,12 @@ function publishJson(room, topic, data) {
   }
 }
 
+function isBeyConcurrencyError(error) {
+  const statusCode = Number(error?.statusCode || 0);
+  const body = String(error?.body?.error || error?.body || "");
+  return statusCode === 429 || body.toLowerCase().includes("concurrency limit");
+}
+
 function extractUserIdFromRoomName(roomName) {
   const match = String(roomName || "").match(/^mentor-(.+)$/);
   return match?.[1] || "";
@@ -192,7 +206,36 @@ async function detectEndIntentInternally(text) {
   }
 }
 
-function forwardAssistantChatToRoom(session, room, aiSpeechIdRef, trainingStateRef) {
+async function ensureWorkerDbConnected() {
+  if (mongoose.connection.readyState === 1) return;
+  if (workerDbConnectPromise) return workerDbConnectPromise;
+  if (!mongoUri) throw new Error("MONGODB_URI is missing.");
+  workerDbConnectPromise = mongoose.connect(mongoUri, { dbName: mongoDbName }).finally(() => {
+    workerDbConnectPromise = null;
+  });
+  return workerDbConnectPromise;
+}
+
+async function storeConversationMessageInternally({ userId, roomName, role, text, speechId = "", interrupted = false }) {
+  const safeText = String(text || "").trim();
+  if (!userId || !safeText) return;
+  try {
+    await ensureWorkerDbConnected();
+    await ConversationMessage.create({
+      userId,
+      roomName: String(roomName || "").trim(),
+      role,
+      text: safeText,
+      speechId: String(speechId || "").trim(),
+      interrupted: Boolean(interrupted),
+      source: "voice-agent",
+    });
+  } catch (error) {
+    console.warn("[conversation] persist error", error?.message || error);
+  }
+}
+
+function forwardAssistantChatToRoom(session, room, aiSpeechIdRef, trainingStateRef, userId) {
   const { SpeechCreated } = voice.AgentSessionEventTypes;
   const forwardedItemIds = new Set();
   let completionEventSent = false;
@@ -242,6 +285,16 @@ function forwardAssistantChatToRoom(session, room, aiSpeechIdRef, trainingStateR
           interrupted: wasInterrupted,
           timestamp: Date.now(),
         });
+        if (text) {
+          void storeConversationMessageInternally({
+            userId,
+            roomName: room?.name || "",
+            role: "assistant",
+            text,
+            speechId: speechHandle.id,
+            interrupted: wasInterrupted,
+          });
+        }
         if (!completionEventSent && !wasInterrupted && isLastQuestion) {
           completionEventSent = true;
           if (trainingStateRef) {
@@ -276,18 +329,19 @@ export default defineAgent({
       tts: resolveTts(),
       allowInterruptions: true,
       preemptiveGeneration: false,
-      userAwayTimeout: 12,
+      userAwayTimeout: userAwayTimeoutSec,
       turnHandling: {
         endpointing: {
           mode: "fixed",
-          // End user turn only after ~4s of silence.
-          minDelay: 4000,
-          maxDelay: 4000,
+          // Lower endpointing delay for faster turn closure.
+          minDelay: endpointingDelayMs,
+          maxDelay: endpointingDelayMs,
         },
         interruption: {
           enabled: true,
-          minDuration: 800,
-          minWords: 1,
+          // Avoid startup/session-noise interruptions immediately killing playout.
+          minDuration: 1200,
+          minWords: 2,
         },
       },
     });
@@ -305,6 +359,16 @@ export default defineAgent({
       });
 
       if (event?.isFinal) {
+        if (userId) {
+          void storeConversationMessageInternally({
+            userId,
+            roomName: ctx.room?.name || "",
+            role: "user",
+            text: transcript,
+            speechId: `user-turn-${userTurnSeq}`,
+            interrupted: false,
+          });
+        }
         if (trainingStateRef.completionReached) {
           void (async () => {
             const shouldEnd = await detectEndIntentInternally(transcript);
@@ -361,7 +425,7 @@ export default defineAgent({
     const adaptiveInstructions = buildAdaptiveMentorInstructions(candidateProfile);
 
     const aiSpeechIdRef = { current: null };
-    forwardAssistantChatToRoom(session, ctx.room, aiSpeechIdRef, trainingStateRef);
+    forwardAssistantChatToRoom(session, ctx.room, aiSpeechIdRef, trainingStateRef, userId);
 
     await session.start({
       room: ctx.room,
@@ -378,6 +442,10 @@ export default defineAgent({
         // Keep AI transcript aligned with avatar playout unless explicitly disabled.
         syncTranscription: syncAiTranscription,
       },
+      inputOptions: {
+        participantIdentity: userId ? `user-${userId}` : undefined,
+        closeOnDisconnect,
+      },
     });
 
     const avatar = new bey.AvatarSession({
@@ -387,16 +455,28 @@ export default defineAgent({
       avatarParticipantName: "Beyond Presence Avatar",
     });
 
-    await avatar.start(session, ctx.room, {
-      livekitUrl: process.env.LIVEKIT_URL,
-      livekitApiKey: process.env.LIVEKIT_API_KEY,
-      livekitApiSecret: process.env.LIVEKIT_API_SECRET,
-    });
+    try {
+      await avatar.start(session, ctx.room, {
+        livekitUrl: process.env.LIVEKIT_URL,
+        livekitApiKey: process.env.LIVEKIT_API_KEY,
+        livekitApiSecret: process.env.LIVEKIT_API_SECRET,
+      });
+    } catch (error) {
+      if (isBeyConcurrencyError(error)) {
+        console.warn("[BEY] Avatar start skipped due to concurrency limit. Continuing voice-only session.");
+      } else {
+        console.warn("[BEY] Avatar start failed. Continuing voice-only session:", error?.message || error);
+      }
+    }
 
-    session.generateReply({
-      instructions:
-        "Welcome them warmly to the AI Mentor session with a personalized opening that references their current academic level and two weakest subjects. Mention that they can ask unlimited doubts. Speak clearly and a bit slower than normal, with a calm tone. End with a doubt-focused check-in like 'Any other doubt you have?'.",
-    });
+    try {
+      session.generateReply({
+        instructions:
+          "Welcome them warmly to the AI Mentor session with a personalized opening that references their current academic level and two weakest subjects. Mention that they can ask unlimited doubts. Speak clearly and a bit slower than normal, with a calm tone. End with a doubt-focused check-in like 'Any other doubt you have?'.",
+      });
+    } catch (error) {
+      console.warn("[AGENT] Skipped initial greeting because session is no longer running:", error?.message || error);
+    }
   },
 });
 

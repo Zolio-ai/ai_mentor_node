@@ -8,7 +8,7 @@ import nodemailer from "nodemailer";
 import OpenAI from "openai";
 import { Server } from "socket.io";
 import { createAuthMiddleware } from "./src/middleware/auth.mjs";
-import { CameraAttendance, CandidateInvitation, User } from "./src/models/index.mjs";
+import { CameraAttendance, CandidateInvitation, ConversationMessage, User } from "./src/models/index.mjs";
 import { registerAuthRoutes } from "./src/routes/registerAuthRoutes.mjs";
 import { registerAvatarRoutes } from "./src/routes/registerAvatarRoutes.mjs";
 import { registerAttendanceRoutes } from "./src/routes/registerAttendanceRoutes.mjs";
@@ -154,6 +154,7 @@ registerSocketHandlers(io, {
   deepgramApiKey: process.env.DEEPGRAM_API_KEY,
   deepgramSttModel,
   deepgramTtsModel,
+  ConversationMessage,
 });
 
 validateEnv();

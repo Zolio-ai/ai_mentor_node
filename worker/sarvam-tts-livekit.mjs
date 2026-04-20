@@ -45,11 +45,13 @@ export class SarvamTts extends tts.TTS {
     super(sampleRate, 1, { streaming: false, alignedTranscript: false });
     const apiKey = opts.apiKey || process.env.SARVAM_API_KEY || process.env.SARWAM_API_KEY;
     if (!apiKey) throw new Error("SARVAM_API_KEY (or SARWAM_API_KEY) is required");
+    const model = opts.model || process.env.SARVAM_TTS_MODEL || "bulbul:v2";
+    const defaultSpeaker = model === "bulbul:v3" ? "aditya" : "anushka";
     this.#opts = {
       apiKey,
       baseUrl: opts.baseUrl || process.env.SARVAM_API_BASE_URL || DEFAULT_BASE_URL,
-      model: opts.model || process.env.SARVAM_TTS_MODEL || "bulbul:v2",
-      speaker: opts.speaker || process.env.SARVAM_TTS_SPEAKER || "anushka",
+      model,
+      speaker: opts.speaker || process.env.SARVAM_TTS_SPEAKER || defaultSpeaker,
       languageCode: opts.languageCode || process.env.SARVAM_TTS_LANGUAGE || "en-IN",
       sampleRate,
     };
