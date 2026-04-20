@@ -76,3 +76,49 @@ const candidateInvitationSchema = new mongoose.Schema(
 export const User = mongoose.model("User", userSchema);
 export const CameraAttendance = mongoose.model("CameraAttendance", cameraAttendanceSchema);
 export const CandidateInvitation = mongoose.model("CandidateInvitation", candidateInvitationSchema);
+
+const studyPlanSchema = new mongoose.Schema(
+  {
+    planName: { type: String, required: true, trim: true },
+    weeks: [
+      {
+        weekNumber: { type: Number, required: true },
+        title: { type: String, default: "", trim: true },
+        topics: [{ type: String, trim: true }],
+      },
+    ],
+    rawContent: { type: String },
+  },
+  { timestamps: true },
+);
+
+const studyMaterialSchema = new mongoose.Schema(
+  {
+    subject: { type: String, required: true, trim: true },
+    fileName: { type: String, required: true, trim: true },
+    chapters: [
+      {
+        chapterNumber: { type: Number, required: true },
+        chapterTitle: { type: String, required: true, trim: true },
+        topics: [
+          {
+            title: { type: String, required: true, trim: true },
+            content: { type: String, default: "" },
+            media: [
+              {
+                type: { type: String, enum: ["image", "graph", "formula", "table", "diagram"] },
+                description: { type: String, default: "" },
+                content: { type: String, default: "" }, // e.g. LaTeX for formula
+              },
+            ],
+          },
+        ],
+      },
+    ],
+    rawContent: { type: String },
+  },
+  { timestamps: true },
+);
+
+export const StudyPlan = mongoose.model("StudyPlan", studyPlanSchema);
+export const StudyMaterial = mongoose.model("StudyMaterial", studyMaterialSchema);

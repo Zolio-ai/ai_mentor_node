@@ -12,6 +12,7 @@ import { CameraAttendance, CandidateInvitation, User } from "./src/models/index.
 import { registerAuthRoutes } from "./src/routes/registerAuthRoutes.mjs";
 import { registerAvatarRoutes } from "./src/routes/registerAvatarRoutes.mjs";
 import { registerAttendanceRoutes } from "./src/routes/registerAttendanceRoutes.mjs";
+import { registerParsingRoutes } from "./src/routes/registerParsingRoutes.mjs";
 import { registerSocketHandlers } from "./src/socket/registerSocketHandlers.mjs";
 
 dotenv.config();
@@ -139,6 +140,11 @@ registerAttendanceRoutes(app, {
   verifyHttpAuth,
   verifyAdminAuth,
   internalApiKey,
+});
+
+registerParsingRoutes(app, {
+  verifyHttpAuth,
+  openai,
 });
 
 registerSocketHandlers(io, {
