@@ -1,4 +1,10 @@
-import { getAllStudyPlans, getAllStudyMaterials, getStudyMaterialById } from "../services/studyService.mjs";
+import {
+  getAllStudyPlans,
+  getAllStudyMaterials,
+  getStudyMaterialById,
+  getOrCreateStudyProgress,
+  completeCurrentTopic,
+} from "../services/studyService.mjs";
 
 /**
  * Controller for handling study-related requests.
@@ -42,5 +48,80 @@ export const createStudyController = () => {
     }
   };
 
-  return { getStudyPlans, getStudyMaterials, downloadStudyMaterial };
+  const getProgress = async (req, res) => {
+    try {
+      const userId = req.user.sub || req.params?.userId;
+      if (!userId) return res.status(400).json({ success: false, message: "userId is required" });
+      const progress = await getOrCreateStudyProgress(userId);
+      res.status(200).json({ success: true, data: progress });
+    } catch (error) {
+      console.error("Error fetching study progress:", error);
+      res.status(500).json({ success: false, message: error.message });
+    }
+  };
+
+  const completeTopic = async (req, res) => {
+    try {
+      const userId = req.user.sub;
+      const progress = await completeCurrentTopic(userId);
+      res.status(200).json({ success: true, data: progress });
+    } catch (error) {
+      console.error("Error completing topic:", error);
+      res.status(500).json({ success: false, message: error.message });
+    }
+  };
+
+  const internalGetStudyContext = async (req, res) => {
+    try {
+      const { userId } = req.params;
+      const progress = await getOrCreateStudyProgress(userId);
+      if (!progress || !progress.studyMaterialId) {
+        return res.status(200).json({ ok: true, studyContext: null });
+      }
+
+      const material = progress.studyMaterialId;
+      const chapter = material.chapters[progress.currentChapterIndex];
+      const topic = chapter?.topics[progress.currentTopicIndex];
+
+      res.status(200).json({
+        ok: true,
+        studyContext: {
+          materialId: material._id,
+          subject: material.subject,
+          currentChapter: {
+            title: chapter?.chapterTitle,
+            number: chapter?.chapterNumber,
+          },
+          currentTopic: topic,
+          totalChapters: material.chapters.length,
+          progressPercent: Math.round(((progress.currentChapterIndex + 1) / material.chapters.length) * 100),
+          isCompleted: progress.isCompleted,
+        },
+      });
+    } catch (error) {
+      console.error("Internal error fetching study context:", error);
+      res.status(500).json({ ok: false, message: error.message });
+    }
+  };
+
+  const internalCompleteTopic = async (req, res) => {
+    try {
+      const { userId } = req.body;
+      const progress = await completeCurrentTopic(userId);
+      res.status(200).json({ ok: true, data: progress });
+    } catch (error) {
+      console.error("Internal error completing topic:", error);
+      res.status(500).json({ ok: false, message: error.message });
+    }
+  };
+
+  return {
+    getStudyPlans,
+    getStudyMaterials,
+    downloadStudyMaterial,
+    getProgress,
+    completeTopic,
+    internalGetStudyContext,
+    internalCompleteTopic,
+  };
 };

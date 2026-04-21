@@ -14,4 +14,12 @@ export const registerStudyRoutes = (app, { verifyHttpAuth }) => {
 
   // Download study material PDF
   app.get("/study-materials/:id/download", verifyHttpAuth, controller.downloadStudyMaterial);
+
+  // Study Progress (Candidate)
+  app.get("/data/study-progress", verifyHttpAuth, controller.getProgress);
+  app.post("/data/study-progress/complete", verifyHttpAuth, controller.completeTopic);
+
+  // Internal routes for worker
+  app.get("/internal/candidates/:userId/study-context", controller.internalGetStudyContext);
+  app.post("/internal/training/complete-topic", controller.internalCompleteTopic);
 };

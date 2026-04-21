@@ -131,9 +131,22 @@ const studyMaterialSchema = new mongoose.Schema(
   { timestamps: true },
 );
 
+const studyProgressSchema = new mongoose.Schema(
+  {
+    userId: { type: String, required: true, index: true },
+    studyMaterialId: { type: mongoose.Schema.Types.ObjectId, ref: "StudyMaterial", required: true },
+    currentChapterIndex: { type: Number, default: 0 },
+    currentTopicIndex: { type: Number, default: 0 },
+    isCompleted: { type: Boolean, default: false },
+    lastAccessedAt: { type: Date, default: Date.now },
+  },
+  { timestamps: true },
+);
+
 export const User = mongoose.model("User", userSchema);
 export const CameraAttendance = mongoose.model("CameraAttendance", cameraAttendanceSchema);
 export const CandidateInvitation = mongoose.model("CandidateInvitation", candidateInvitationSchema);
 export const ConversationMessage = mongoose.model("ConversationMessage", conversationMessageSchema);
 export const StudyPlan = mongoose.model("StudyPlan", studyPlanSchema);
 export const StudyMaterial = mongoose.model("StudyMaterial", studyMaterialSchema);
+export const StudyProgress = mongoose.model("StudyProgress", studyProgressSchema);

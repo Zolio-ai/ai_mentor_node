@@ -89,51 +89,82 @@ function rankSubjects(marks) {
 }
 
 async function fetchCandidateProfileInternally(userId) {
-  if (!userId || !internalApiKey) return null;
+  if (!userId || !internalApiKey) return { profile: null, studyContext: null };
   try {
-    const response = await fetch(`${apiBaseUrl}/internal/candidates/${userId}/profile`, {
-      headers: {
-        "x-internal-key": internalApiKey,
-      },
+    const profRes = await fetch(`${apiBaseUrl}/internal/candidates/${userId}/profile`, {
+      headers: { "x-internal-key": internalApiKey },
     });
-    if (!response.ok) return null;
-    const payload = await response.json().catch(() => ({}));
-    return payload?.profile || null;
-  } catch {
-    return null;
+    const profilePayload = await profRes.json().catch(() => ({}));
+    
+    const studyRes = await fetch(`${apiBaseUrl}/internal/candidates/${userId}/study-context`, {
+      headers: { "x-internal-key": internalApiKey },
+    });
+    const studyPayload = await studyRes.json().catch(() => ({}));
+
+    return {
+      profile: profilePayload?.profile || null,
+      studyContext: studyPayload?.studyContext || null,
+    };
+  } catch (error) {
+    console.error("[worker] fetch candidate data error", error);
+    return { profile: null, studyContext: null };
   }
 }
 
-function buildAdaptiveMentorInstructions(profile) {
+function buildAdaptiveMentorInstructions(profile, studyContext) {
+  let baseInstructions = "";
   if (!profile) {
-    return "Candidate profile is unavailable. Ask 3 quick diagnostic questions (target role/exam, strongest topic, weakest topic), then adapt mentoring plan from their answers.";
+    baseInstructions = "Candidate profile is unavailable. Ask 3 quick diagnostic questions (target role/exam, strongest topic, weakest topic), then adapt mentoring plan from their answers.";
+  } else {
+    const marks = {
+      physics: profile?.marks?.physics,
+      chemistry: profile?.marks?.chemistry,
+      maths: profile?.marks?.maths,
+      biology: profile?.marks?.biology,
+    };
+    const ranked = rankSubjects(marks);
+    const strongest = ranked.strongest.map(([subject, score]) => `${subject} (${score})`).join(", ") || "N/A";
+    const weakest = ranked.weakest.map(([subject, score]) => `${subject} (${score})`).join(", ") || "N/A";
+    const avg =
+      ranked.all.length > 0
+        ? Number((ranked.all.reduce((sum, [, score]) => sum + score, 0) / ranked.all.length).toFixed(1))
+        : null;
+
+    let levelBand = "beginner";
+    if (avg != null && avg >= 85) levelBand = "advanced";
+    else if (avg != null && avg >= 70) levelBand = "intermediate";
+
+    baseInstructions = [
+      `Candidate name: ${profile.firstName || profile.name || "Candidate"}`,
+      `Class: ${profile.class ?? "N/A"}, Stream: ${profile.stream || "N/A"}, Entrance Exam: ${profile.entranceExam || "N/A"}`,
+      `Subject marks: Physics=${marks.physics ?? "N/A"}, Chemistry=${marks.chemistry ?? "N/A"}, Maths=${marks.maths ?? "N/A"}, Biology=${marks.biology ?? "N/A"}, CGPA10=${profile.cgpa10 ?? "N/A"}`,
+      `Strongest subjects: ${strongest}`,
+      `Weakest subjects: ${weakest}`,
+      `Estimated level: ${levelBand}`,
+    ].join("\n");
   }
 
-  const marks = {
-    physics: profile?.marks?.physics,
-    chemistry: profile?.marks?.chemistry,
-    maths: profile?.marks?.maths,
-    biology: profile?.marks?.biology,
-  };
-  const ranked = rankSubjects(marks);
-  const strongest = ranked.strongest.map(([subject, score]) => `${subject} (${score})`).join(", ") || "N/A";
-  const weakest = ranked.weakest.map(([subject, score]) => `${subject} (${score})`).join(", ") || "N/A";
-  const avg =
-    ranked.all.length > 0
-      ? Number((ranked.all.reduce((sum, [, score]) => sum + score, 0) / ranked.all.length).toFixed(1))
-      : null;
-
-  let levelBand = "beginner";
-  if (avg != null && avg >= 85) levelBand = "advanced";
-  else if (avg != null && avg >= 70) levelBand = "intermediate";
+  const studyInstructions = studyContext
+    ? [
+        "",
+        "--- STUDY MATERIAL CONTEXT ---",
+        `Current Subject: ${studyContext.subject}`,
+        `Current Chapter: ${studyContext.currentChapter?.number}. ${studyContext.currentChapter?.title}`,
+        `Current Topic: ${studyContext.currentTopic?.title}`,
+        `Topic Content: ${studyContext.currentTopic?.content}`,
+        `Overall Progress: ${studyContext.progressPercent}% (${studyContext.totalChapters} chapters total)`,
+        "",
+        "Mentoring Goal:",
+        `- Guide the candidate through "${studyContext.currentTopic?.title}".`,
+        "- Explain the content clearly, using LaTeX for formulas.",
+        "- Once you feel they have understood this topic, conclude it clearly (e.g. 'Great, let's move to the next topic') and the system will advance the progress.",
+        "------------------------------",
+      ].join("\n")
+    : "";
 
   return [
-    `Candidate name: ${profile.firstName || profile.name || "Candidate"}`,
-    `Class: ${profile.class ?? "N/A"}, Stream: ${profile.stream || "N/A"}, Entrance Exam: ${profile.entranceExam || "N/A"}`,
-    `Subject marks: Physics=${marks.physics ?? "N/A"}, Chemistry=${marks.chemistry ?? "N/A"}, Maths=${marks.maths ?? "N/A"}, Biology=${marks.biology ?? "N/A"}, CGPA10=${profile.cgpa10 ?? "N/A"}`,
-    `Strongest subjects: ${strongest}`,
-    `Weakest subjects: ${weakest}`,
-    `Estimated level: ${levelBand}`,
+    baseInstructions,
+    studyInstructions,
     "Mentoring behavior rules:",
     "- Personalize examples using strong subjects first, then bridge into weak subjects.",
     "- Spend more time on weakest two subjects with simpler step-by-step explanations.",
@@ -186,23 +217,34 @@ async function markTrainingCompletionInternally(roomName, isLastQuestion) {
   }
 }
 
-async function detectEndIntentInternally(text) {
+async function detectTopicCompletionInternally(text) {
   const transcript = String(text || "").trim();
   if (!transcript || !internalApiKey) return false;
+  // Simple heuristic for now, or could use another LLM call
+  const conclusionPhrases = [
+    "move to the next topic",
+    "completed this topic",
+    "finished this topic",
+    "let's move on",
+    "heading to the next chapter",
+  ];
+  const matched = conclusionPhrases.some((p) => transcript.toLowerCase().includes(p));
+  return matched;
+}
+
+async function markTopicCompletedInternally(userId) {
+  if (!userId || !internalApiKey) return;
   try {
-    const response = await fetch(`${apiBaseUrl}/internal/training/end-intent`, {
+    await fetch(`${apiBaseUrl}/internal/training/complete-topic`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         "x-internal-key": internalApiKey,
       },
-      body: JSON.stringify({ text: transcript }),
+      body: JSON.stringify({ userId }),
     });
-    if (!response.ok) return false;
-    const payload = await response.json().catch(() => ({}));
-    return Boolean(payload?.endIntent);
-  } catch {
-    return false;
+  } catch (error) {
+    console.warn("[worker] failed to mark topic completed", error);
   }
 }
 
@@ -291,7 +333,7 @@ async function storeConversationMessageInternally({ userId, roomName, role, text
   }
 }
 
-function forwardAssistantChatToRoom(session, room, aiSpeechIdRef, trainingStateRef, userId) {
+function forwardAssistantChatToRoom(session, room, aiSpeechIdRef, trainingStateRef, userId, studyContext) {
   const { SpeechCreated } = voice.AgentSessionEventTypes;
   const forwardedItemIds = new Set();
   let completionEventSent = false;
@@ -314,7 +356,7 @@ function forwardAssistantChatToRoom(session, room, aiSpeechIdRef, trainingStateR
       aiSpeechIdRef.current = speechHandle.id;
     }
 
-    speechHandle.addDoneCallback(() => {
+    speechHandle.addDoneCallback(async () => {
       const wasInterrupted =
         safeFlagValue(speechHandle?.interrupted) ||
         safeFlagValue(speechHandle?.isInterrupted) ||
@@ -331,7 +373,13 @@ function forwardAssistantChatToRoom(session, room, aiSpeechIdRef, trainingStateR
               .catch((error) => console.error("sendText failed", error));
           }
         }
-        const isLastQuestion = false;
+        
+        const isTopicConclusion = !wasInterrupted && (await detectTopicCompletionInternally(text));
+        if (isTopicConclusion) {
+          await markTopicCompletedInternally(userId);
+        }
+
+        const isLastQuestion = studyContext?.isCompleted || false;
         publishJson(room, "mentor.ai.transcript", {
           type: "assistant_transcript",
           id: speechHandle.id,
@@ -360,7 +408,7 @@ function forwardAssistantChatToRoom(session, room, aiSpeechIdRef, trainingStateR
           publishJson(room, "mentor.training.status", {
             type: "training_completion_reached",
             id: speechHandle.id,
-            sectionTitle: "Continuous mentoring mode",
+            sectionTitle: "Study plan completed",
             timestamp: Date.now(),
           });
         }
@@ -511,11 +559,11 @@ export default defineAgent({
     await ctx.connect();
 
     const userId = extractUserIdFromRoomName(ctx.room?.name || "");
-    const candidateProfile = await fetchCandidateProfileInternally(userId);
-    const adaptiveInstructions = buildAdaptiveMentorInstructions(candidateProfile);
+    const { profile, studyContext } = await fetchCandidateProfileInternally(userId);
+    const adaptiveInstructions = buildAdaptiveMentorInstructions(profile, studyContext);
 
     const aiSpeechIdRef = { current: null };
-    forwardAssistantChatToRoom(session, ctx.room, aiSpeechIdRef, trainingStateRef, userId);
+    forwardAssistantChatToRoom(session, ctx.room, aiSpeechIdRef, trainingStateRef, userId, studyContext);
 
     await session.start({
       room: ctx.room,
