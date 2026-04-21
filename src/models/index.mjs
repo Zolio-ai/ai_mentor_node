@@ -86,7 +86,52 @@ const conversationMessageSchema = new mongoose.Schema(
   { timestamps: true },
 );
 
+const studyPlanSchema = new mongoose.Schema(
+  {
+    planName: { type: String, default: "General Plan", trim: true },
+    weeks: [
+      {
+        weekNumber: { type: Number, default: null },
+        title: { type: String, default: "", trim: true },
+        topics: [{ type: String, default: "", trim: true }],
+      },
+    ],
+    rawContent: { type: String, default: "" },
+  },
+  { timestamps: true },
+);
+
+const studyMaterialSchema = new mongoose.Schema(
+  {
+    subject: { type: String, default: "General", trim: true },
+    fileName: { type: String, default: "", trim: true },
+    chapters: [
+      {
+        chapterNumber: { type: Number, default: null },
+        chapterTitle: { type: String, default: "", trim: true },
+        topics: [
+          {
+            title: { type: String, default: "", trim: true },
+            content: { type: String, default: "" },
+            media: [
+              {
+                type: { type: String, default: "", trim: true },
+                description: { type: String, default: "" },
+                content: { type: String, default: "" },
+              },
+            ],
+          },
+        ],
+      },
+    ],
+    rawContent: { type: String, default: "" },
+  },
+  { timestamps: true },
+);
+
 export const User = mongoose.model("User", userSchema);
 export const CameraAttendance = mongoose.model("CameraAttendance", cameraAttendanceSchema);
 export const CandidateInvitation = mongoose.model("CandidateInvitation", candidateInvitationSchema);
 export const ConversationMessage = mongoose.model("ConversationMessage", conversationMessageSchema);
+export const StudyPlan = mongoose.model("StudyPlan", studyPlanSchema);
+export const StudyMaterial = mongoose.model("StudyMaterial", studyMaterialSchema);
