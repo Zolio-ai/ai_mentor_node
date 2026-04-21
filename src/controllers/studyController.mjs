@@ -4,12 +4,15 @@ import {
   getStudyMaterialById,
   getOrCreateStudyProgress,
   completeCurrentTopic,
+  generateChapterAssessment,
+  saveChapterAssessment,
+  getAssessmentStatuses as fetchAssessmentStatuses,
 } from "../services/studyService.mjs";
 
 /**
  * Controller for handling study-related requests.
  */
-export const createStudyController = () => {
+export const createStudyController = ({ openai, openAiModel } = {}) => {
   const getStudyPlans = async (req, res) => {
     try {
       const plans = await getAllStudyPlans();
@@ -115,6 +118,42 @@ export const createStudyController = () => {
     }
   };
 
+  const getChapterAssessment = async (req, res) => {
+    try {
+      const userId = req.user.sub;
+      const { chapterIndex } = req.params;
+      const assessment = await generateChapterAssessment(userId, Number(chapterIndex), { openai, openAiModel });
+      res.status(200).json({ success: true, ...assessment });
+    } catch (error) {
+      console.error("Error generating assessment:", error);
+      res.status(500).json({ success: false, message: error.message });
+    }
+  };
+
+  const submitChapterAssessment = async (req, res) => {
+    try {
+      const userId = req.user.sub;
+      const { chapterIndex } = req.params;
+      const { answers } = req.body;
+      const result = await saveChapterAssessment(userId, Number(chapterIndex), answers);
+      res.status(200).json({ success: true, data: result });
+    } catch (error) {
+      console.error("Error submitting assessment:", error);
+      res.status(500).json({ success: false, message: error.message });
+    }
+  };
+
+  const getAssessmentStatuses = async (req, res) => {
+    try {
+      const userId = req.user.sub;
+      const statuses = await fetchAssessmentStatuses(userId);
+      res.status(200).json({ success: true, data: statuses });
+    } catch (error) {
+      console.error("Error fetching assessment statuses:", error);
+      res.status(500).json({ success: false, message: error.message });
+    }
+  };
+
   return {
     getStudyPlans,
     getStudyMaterials,
@@ -123,5 +162,8 @@ export const createStudyController = () => {
     completeTopic,
     internalGetStudyContext,
     internalCompleteTopic,
+    getChapterAssessment,
+    submitChapterAssessment,
+    getAssessmentStatuses,
   };
 };

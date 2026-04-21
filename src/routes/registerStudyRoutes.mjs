@@ -3,8 +3,8 @@ import { createStudyController } from "../controllers/studyController.mjs";
 /**
  * Registers study-related routes to the express application.
  */
-export const registerStudyRoutes = (app, { verifyHttpAuth }) => {
-  const controller = createStudyController();
+export const registerStudyRoutes = (app, { verifyHttpAuth, openai, openAiModel }) => {
+  const controller = createStudyController({ openai, openAiModel });
 
   // Fetch all study plans
   app.get("/study-plans", verifyHttpAuth, controller.getStudyPlans);
@@ -18,6 +18,11 @@ export const registerStudyRoutes = (app, { verifyHttpAuth }) => {
   // Study Progress (Candidate)
   app.get("/data/study-progress", verifyHttpAuth, controller.getProgress);
   app.post("/data/study-progress/complete", verifyHttpAuth, controller.completeTopic);
+
+  // Assessment Endpoints
+  app.get("/data/study/chapters/:chapterIndex/assessment", verifyHttpAuth, controller.getChapterAssessment);
+  app.post("/data/study/chapters/:chapterIndex/submit", verifyHttpAuth, controller.submitChapterAssessment);
+  app.get("/data/study/assessment-statuses", verifyHttpAuth, controller.getAssessmentStatuses);
 
   // Internal routes for worker
   app.get("/internal/candidates/:userId/study-context", controller.internalGetStudyContext);

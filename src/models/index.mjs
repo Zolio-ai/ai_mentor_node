@@ -131,6 +131,25 @@ const studyMaterialSchema = new mongoose.Schema(
   { timestamps: true },
 );
 
+const assessmentResultSchema = new mongoose.Schema(
+  {
+    userId: { type: String, required: true, index: true },
+    studyMaterialId: { type: mongoose.Schema.Types.ObjectId, ref: "StudyMaterial", required: true },
+    chapterIndex: { type: Number, required: true },
+    score: { type: Number, required: true },
+    totalQuestions: { type: Number, default: 10 },
+    answers: [
+      {
+        questionId: { type: String, required: true },
+        selectedOption: { type: String, required: true },
+        isCorrect: { type: Boolean, required: true },
+      },
+    ],
+    attempts: { type: Number, default: 1 },
+  },
+  { timestamps: true },
+);
+
 const studyProgressSchema = new mongoose.Schema(
   {
     userId: { type: String, required: true, index: true },
@@ -150,3 +169,4 @@ export const ConversationMessage = mongoose.model("ConversationMessage", convers
 export const StudyPlan = mongoose.model("StudyPlan", studyPlanSchema);
 export const StudyMaterial = mongoose.model("StudyMaterial", studyMaterialSchema);
 export const StudyProgress = mongoose.model("StudyProgress", studyProgressSchema);
+export const AssessmentResult = mongoose.model("AssessmentResult", assessmentResultSchema);

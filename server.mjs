@@ -151,6 +151,8 @@ registerParsingRoutes(app, {
 
 registerStudyRoutes(app, {
   verifyHttpAuth,
+  openai,
+  openAiModel,
 });
 
 registerSocketHandlers(io, {

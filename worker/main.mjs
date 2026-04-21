@@ -171,6 +171,7 @@ function buildAdaptiveMentorInstructions(profile, studyContext) {
     "- Ask short check questions to validate understanding before moving on.",
     "- Give a practical micro-study plan (today, this week) tailored to weakest subjects.",
     "- Keep guidance concise, actionable, and confidence-building.",
+    "- **Output plain text ONLY.** Absolutely no Markdown (e.g., **, ###, etc.).",
   ].join("\n");
 }
 
@@ -612,8 +613,8 @@ export default defineAgent({
     try {
       session.generateReply({
         instructions: isResumeSession
-          ? "Welcome them back warmly and clearly say you are resuming from where they left off in the previous session. Briefly summarize likely focus areas from prior mentoring context (weakest two subjects), then ask what they want to continue with first. Keep it concise, calm, and supportive."
-          : "Welcome them warmly to the AI Mentor session with a personalized opening that references their current academic level and two weakest subjects. Mention that they can ask unlimited doubts. Speak clearly and a bit slower than normal, with a calm tone. End with a doubt-focused check-in like 'Any other doubt you have?'.",
+          ? "Welcome them back warmly and clearly say you are resuming from where they left off in the previous session. Briefly summarize likely focus areas from prior mentoring context (weakest two subjects), then ask what they want to continue with first. Keep it concise, calm, and supportive. Use plain text only, no Markdown."
+          : "Welcome them warmly to the AI Mentor session with a personalized opening that references their current academic level and two weakest subjects. Mention that they can ask unlimited doubts. Speak clearly and a bit slower than normal, with a calm tone. End with a doubt-focused check-in like 'Any other doubt you have?'. Use plain text only, no Markdown.",
       });
     } catch (error) {
       console.warn("[AGENT] Skipped initial greeting because session is no longer running:", error?.message || error);
