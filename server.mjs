@@ -13,6 +13,7 @@ import { registerAuthRoutes } from "./src/routes/registerAuthRoutes.mjs";
 import { registerAvatarRoutes } from "./src/routes/registerAvatarRoutes.mjs";
 import { registerAttendanceRoutes } from "./src/routes/registerAttendanceRoutes.mjs";
 import { registerParsingRoutes } from "./src/routes/registerParsingRoutes.mjs";
+import { registerStudyRoutes } from "./src/routes/registerStudyRoutes.mjs";
 import { registerSocketHandlers } from "./src/socket/registerSocketHandlers.mjs";
 
 dotenv.config();
@@ -145,6 +146,10 @@ registerAttendanceRoutes(app, {
 registerParsingRoutes(app, {
   verifyHttpAuth,
   openai,
+});
+
+registerStudyRoutes(app, {
+  verifyHttpAuth,
 });
 
 registerSocketHandlers(io, {

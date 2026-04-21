@@ -110,6 +110,8 @@ ${text}`,
     fileName,
     chapters: parsedData.chapters,
     rawContent: text,
+    fileData: buffer,
+    fileType: "application/pdf",
   });
 
   await studyMaterial.save();

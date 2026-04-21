@@ -124,7 +124,9 @@ const studyMaterialSchema = new mongoose.Schema(
         ],
       },
     ],
-    rawContent: { type: String, default: "" },
+    rawContent: { type: String },
+    fileData: { type: Buffer },
+    fileType: { type: String, default: "application/pdf" },
   },
   { timestamps: true },
 );
