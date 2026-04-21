@@ -206,6 +206,50 @@ async function detectEndIntentInternally(text) {
   }
 }
 
+async function detectAssessmentStartIntentInternally(text) {
+  const transcript = String(text || "").trim();
+  if (!transcript || !internalApiKey) return false;
+  try {
+    const response = await fetch(`${apiBaseUrl}/internal/assessment/start-intent`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-internal-key": internalApiKey,
+      },
+      body: JSON.stringify({ text: transcript }),
+    });
+    if (!response.ok) return false;
+    const payload = await response.json().catch(() => ({}));
+    return Boolean(payload?.startAssessment);
+  } catch {
+    return false;
+  }
+}
+
+async function buildAssessmentQuestionsInternally(userId) {
+  const safeUserId = String(userId || "").trim();
+  if (!safeUserId || !internalApiKey) return null;
+  try {
+    const response = await fetch(`${apiBaseUrl}/internal/assessment/questions`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-internal-key": internalApiKey,
+      },
+      body: JSON.stringify({ userId: safeUserId }),
+    });
+    if (!response.ok) return null;
+    const payload = await response.json().catch(() => ({}));
+    const questions = Array.isArray(payload?.questions) ? payload.questions : [];
+    return {
+      title: String(payload?.title || "Quick Assessment"),
+      questions,
+    };
+  } catch {
+    return null;
+  }
+}
+
 async function ensureWorkerDbConnected() {
   if (mongoose.connection.readyState === 1) return;
   if (workerDbConnectPromise) return workerDbConnectPromise;
@@ -392,6 +436,40 @@ export default defineAgent({
             });
           })();
         }
+        void (async () => {
+          const shouldStartAssessment = await detectAssessmentStartIntentInternally(transcript);
+          if (!shouldStartAssessment) return;
+          const now = Date.now();
+          const generated = await buildAssessmentQuestionsInternally(userId);
+          const generatedQuestions = Array.isArray(generated?.questions) ? generated.questions : [];
+          const fallbackQuestions = [
+            {
+              id: "q1",
+              question: "Which law explains the relation F = m * a?",
+              options: ["Newton's First Law", "Newton's Second Law", "Newton's Third Law", "Law of Gravitation"],
+              correctAnswer: "Newton's Second Law",
+            },
+            {
+              id: "q2",
+              question: "What is the SI unit of force?",
+              options: ["Joule", "Newton", "Pascal", "Watt"],
+              correctAnswer: "Newton",
+            },
+            {
+              id: "q3",
+              question: "Which quantity has both magnitude and direction?",
+              options: ["Speed", "Distance", "Scalar", "Velocity"],
+              correctAnswer: "Velocity",
+            },
+          ];
+          publishJson(ctx.room, "mentor.assessment", {
+            type: "assessment_start",
+            title: generated?.title || "Quick Assessment",
+            questions: generatedQuestions.length > 0 ? generatedQuestions : fallbackQuestions,
+            triggeredBy: transcript,
+            timestamp: now,
+          });
+        })();
         userTurnSeq += 1;
         lastInterimTranscript = "";
         lastInterimAtMs = 0;

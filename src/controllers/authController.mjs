@@ -114,6 +114,22 @@ export function createAuthController(deps) {
     }
   };
 
+  const internalAssessmentStartIntent = async (req, res) => {
+    try {
+      return res.json(await service.internalAssessmentStartIntent(req.headers["x-internal-key"], req.body));
+    } catch (error) {
+      return sendError(res, error, "Failed to evaluate assessment start intent.");
+    }
+  };
+
+  const internalAssessmentQuestions = async (req, res) => {
+    try {
+      return res.json(await service.generateAssessmentFromConversation(req.headers["x-internal-key"], req.body));
+    } catch (error) {
+      return sendError(res, error, "Failed to generate assessment questions.");
+    }
+  };
+
   return {
     register,
     login,
@@ -127,5 +143,7 @@ export function createAuthController(deps) {
     aiRespond,
     aiEndIntent,
     internalTrainingEndIntent,
+    internalAssessmentStartIntent,
+    internalAssessmentQuestions,
   };
 }

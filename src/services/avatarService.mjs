@@ -34,6 +34,7 @@ export function createAvatarService(deps) {
     }
 
     const roomName = `mentor-${user.sub}`;
+    const userIdentity = `user-${user.sub}`;
     try {
       await roomServiceClient.createRoom({
         name: roomName,
@@ -44,14 +45,6 @@ export function createAvatarService(deps) {
       if (!String(error.message || "").includes("already exists")) throw error;
     }
 
-    const participantToken = await createLivekitToken({
-      identity: `user-${user.sub}`,
-      name: user.name || "AI Mentor User",
-      roomName,
-      livekitApiKey,
-      livekitApiSecret,
-    });
-
     const existingDispatches = await agentDispatchClient.listDispatch(roomName);
     const sameAgentDispatches = existingDispatches.filter((dispatch) => dispatch.agentName === livekitAgentName);
     for (const dispatch of sameAgentDispatches) {
@@ -61,6 +54,30 @@ export function createAvatarService(deps) {
         // ignore stale delete failures
       }
     }
+
+    const staleParticipants = await roomServiceClient.listParticipants(roomName).catch(() => []);
+    for (const participant of staleParticipants) {
+      const identity = participant.identity;
+      const shouldRemove =
+        identity === userIdentity ||
+        identity === avatarIdentity ||
+        identity?.startsWith("agent-") ||
+        identity?.includes("bey");
+      if (!shouldRemove) continue;
+      try {
+        await roomServiceClient.removeParticipant(roomName, identity);
+      } catch {
+        // ignore remove failures
+      }
+    }
+
+    const participantToken = await createLivekitToken({
+      identity: userIdentity,
+      name: user.name || "AI Mentor User",
+      roomName,
+      livekitApiKey,
+      livekitApiSecret,
+    });
 
     const dispatch = await agentDispatchClient.createDispatch(roomName, livekitAgentName);
     return {

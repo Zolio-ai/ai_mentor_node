@@ -16,4 +16,6 @@ export function registerAuthRoutes(app, deps) {
   app.post("/ai/respond", controller.aiRespond);
   app.post("/ai/end-intent", verifyHttpAuth, controller.aiEndIntent);
   app.post("/internal/training/end-intent", controller.internalTrainingEndIntent);
+  app.post("/internal/assessment/start-intent", controller.internalAssessmentStartIntent);
+  app.post("/internal/assessment/questions", controller.internalAssessmentQuestions);
 }

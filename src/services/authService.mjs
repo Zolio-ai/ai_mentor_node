@@ -77,6 +77,7 @@ export function createAuthService(deps) {
     User,
     CameraAttendance,
     CandidateInvitation,
+    ConversationMessage,
     internalApiKey,
     jwtSecret,
     adminEmail,
@@ -381,6 +382,29 @@ export function createAuthService(deps) {
     return { endIntent: await evaluateEndIntent(text) };
   };
 
+  const evaluateAssessmentStartIntent = async (text) => {
+    if (!openai) throw createHttpError(503, "AI service unavailable.");
+    const completion = await openai.chat.completions.create({
+      model: openAiModel || "gpt-4o-mini",
+      temperature: 0,
+      messages: [
+        {
+          role: "system",
+          content:
+            'Classify whether the user is asking to START/BEGIN/TAKE an assessment/quiz/test now. Return strict JSON only: {"startAssessment":true|false}.',
+        },
+        { role: "user", content: text },
+      ],
+    });
+
+    const raw = String(completion.choices?.[0]?.message?.content || "").trim();
+    try {
+      return Boolean(JSON.parse(raw)?.startAssessment);
+    } catch {
+      return /"startAssessment"\s*:\s*true/i.test(raw);
+    }
+  };
+
   const internalTrainingEndIntent = async (key, payload) => {
     if (!internalApiKey || String(key || "") !== internalApiKey) {
       throw createHttpError(401, "Unauthorized internal request.");
@@ -388,6 +412,91 @@ export function createAuthService(deps) {
     const text = String(payload?.text || "").trim();
     if (!text) throw createHttpError(400, "text is required.");
     return { ok: true, endIntent: await evaluateEndIntent(text) };
+  };
+
+  const internalAssessmentStartIntent = async (key, payload) => {
+    if (!internalApiKey || String(key || "") !== internalApiKey) {
+      throw createHttpError(401, "Unauthorized internal request.");
+    }
+    const text = String(payload?.text || "").trim();
+    if (!text) throw createHttpError(400, "text is required.");
+    return { ok: true, startAssessment: await evaluateAssessmentStartIntent(text) };
+  };
+
+  const normalizeGeneratedQuestions = (raw) => {
+    if (!Array.isArray(raw)) return [];
+    return raw
+      .map((item, idx) => {
+        const options = Array.isArray(item?.options)
+          ? item.options.map((opt) => String(opt || "").trim()).filter(Boolean)
+          : [];
+        const question = String(item?.question || "").trim();
+        if (!question || options.length < 2) return null;
+        const correctAnswer = String(item?.correctAnswer || "").trim();
+        return {
+          id: String(item?.id || `q${idx + 1}`),
+          question,
+          options: options.slice(0, 4),
+          correctAnswer: correctAnswer || options[0],
+        };
+      })
+      .filter(Boolean)
+      .slice(0, 5);
+  };
+
+  const generateAssessmentFromConversation = async (key, payload) => {
+    if (!internalApiKey || String(key || "") !== internalApiKey) {
+      throw createHttpError(401, "Unauthorized internal request.");
+    }
+    if (!openai) throw createHttpError(503, "AI service unavailable.");
+    const userId = String(payload?.userId || "").trim();
+    if (!userId) throw createHttpError(400, "userId is required.");
+
+    const recentMessages = await ConversationMessage.find({ userId }).sort({ createdAt: -1 }).limit(20).lean();
+    const ordered = [...recentMessages].reverse();
+    const transcript = ordered
+      .map((m) => {
+        const role = m?.role === "assistant" ? "Mentor" : "Candidate";
+        return `${role}: ${String(m?.text || "").trim()}`;
+      })
+      .filter((line) => line.length > 0)
+      .join("\n");
+
+    if (!transcript) {
+      return { ok: true, title: "Quick Assessment", questions: [] };
+    }
+
+    const completion = await openai.chat.completions.create({
+      model: openAiModel || "gpt-4o-mini",
+      temperature: 0.2,
+      messages: [
+        {
+          role: "system",
+          content:
+            'Create 3 to 5 MCQ questions based ONLY on the mentoring conversation. Return strict JSON: {"title":"...","questions":[{"id":"q1","question":"...","options":["...","...","...","..."],"correctAnswer":"..."}]}',
+        },
+        {
+          role: "user",
+          content: `Conversation transcript:\n${transcript}`,
+        },
+      ],
+    });
+
+    const raw = String(completion.choices?.[0]?.message?.content || "").trim();
+    let parsed = {};
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      const match = raw.match(/\{[\s\S]*\}/);
+      parsed = match ? JSON.parse(match[0]) : {};
+    }
+
+    const questions = normalizeGeneratedQuestions(parsed?.questions);
+    return {
+      ok: true,
+      title: String(parsed?.title || "Conversation-based Assessment"),
+      questions,
+    };
   };
 
   return {
@@ -402,5 +511,7 @@ export function createAuthService(deps) {
     aiRespond,
     aiEndIntent,
     internalTrainingEndIntent,
+    internalAssessmentStartIntent,
+    generateAssessmentFromConversation,
   };
 }

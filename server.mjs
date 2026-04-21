@@ -110,6 +110,7 @@ registerAuthRoutes(app, {
   User,
   CameraAttendance,
   CandidateInvitation,
+  ConversationMessage,
   verifyHttpAuth,
   internalApiKey,
   jwtSecret,
