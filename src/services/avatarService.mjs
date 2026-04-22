@@ -17,7 +17,7 @@ async function createLivekitToken({ identity, name, roomName, livekitApiKey, liv
   return token.toJwt();
 }
 
-const SESSION_DEDUPE_TTL_MS = 8000;
+const SESSION_DEDUPE_TTL_MS = 45000;
 const recentSessions = new Map();
 const inFlightSessions = new Map();
 

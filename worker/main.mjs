@@ -22,6 +22,12 @@ const closeOnDisconnect = process.env.VOICE_AGENT_CLOSE_ON_DISCONNECT === "true"
 const mongoUri = process.env.MONGODB_URI || "";
 const mongoDbName = process.env.MONGODB_DB_NAME || "ai_mentor_app";
 let workerDbConnectPromise = null;
+const beyStartStateByRoom = new Map();
+const beyCooldownBaseMs = Math.max(2000, Number(process.env.BEY_START_COOLDOWN_BASE_MS || 5000));
+const beyCooldownMaxMs = Math.max(
+  beyCooldownBaseMs,
+  Number(process.env.BEY_START_COOLDOWN_MAX_MS || 45000),
+);
 
 function normalizeProvider(raw, fallback) {
   const provider = String(raw || fallback)
@@ -89,89 +95,57 @@ function rankSubjects(marks) {
 }
 
 async function fetchCandidateProfileInternally(userId) {
-  if (!userId || !internalApiKey) return { profile: null, studyContext: null };
+  if (!userId || !internalApiKey) return null;
   try {
-    const profRes = await fetch(`${apiBaseUrl}/internal/candidates/${userId}/profile`, {
-      headers: { "x-internal-key": internalApiKey },
+    const response = await fetch(`${apiBaseUrl}/internal/candidates/${userId}/profile`, {
+      headers: {
+        "x-internal-key": internalApiKey,
+      },
     });
-    const profilePayload = await profRes.json().catch(() => ({}));
-    
-    const studyRes = await fetch(`${apiBaseUrl}/internal/candidates/${userId}/study-context`, {
-      headers: { "x-internal-key": internalApiKey },
-    });
-    const studyPayload = await studyRes.json().catch(() => ({}));
-
-    return {
-      profile: profilePayload?.profile || null,
-      studyContext: studyPayload?.studyContext || null,
-    };
-  } catch (error) {
-    console.error("[worker] fetch candidate data error", error);
-    return { profile: null, studyContext: null };
+    if (!response.ok) return null;
+    const payload = await response.json().catch(() => ({}));
+    return payload?.profile || null;
+  } catch {
+    return null;
   }
 }
 
-function buildAdaptiveMentorInstructions(profile, studyContext) {
-  let baseInstructions = "";
+function buildAdaptiveMentorInstructions(profile) {
   if (!profile) {
-    baseInstructions = "Candidate profile is unavailable. Ask 3 quick diagnostic questions (target role/exam, strongest topic, weakest topic), then adapt mentoring plan from their answers.";
-  } else {
-    const marks = {
-      physics: profile?.marks?.physics,
-      chemistry: profile?.marks?.chemistry,
-      maths: profile?.marks?.maths,
-      biology: profile?.marks?.biology,
-    };
-    const ranked = rankSubjects(marks);
-    const strongest = ranked.strongest.map(([subject, score]) => `${subject} (${score})`).join(", ") || "N/A";
-    const weakest = ranked.weakest.map(([subject, score]) => `${subject} (${score})`).join(", ") || "N/A";
-    const avg =
-      ranked.all.length > 0
-        ? Number((ranked.all.reduce((sum, [, score]) => sum + score, 0) / ranked.all.length).toFixed(1))
-        : null;
-
-    let levelBand = "beginner";
-    if (avg != null && avg >= 85) levelBand = "advanced";
-    else if (avg != null && avg >= 70) levelBand = "intermediate";
-
-    baseInstructions = [
-      `Candidate name: ${profile.firstName || profile.name || "Candidate"}`,
-      `Class: ${profile.class ?? "N/A"}, Stream: ${profile.stream || "N/A"}, Entrance Exam: ${profile.entranceExam || "N/A"}`,
-      `Subject marks: Physics=${marks.physics ?? "N/A"}, Chemistry=${marks.chemistry ?? "N/A"}, Maths=${marks.maths ?? "N/A"}, Biology=${marks.biology ?? "N/A"}, CGPA10=${profile.cgpa10 ?? "N/A"}`,
-      `Strongest subjects: ${strongest}`,
-      `Weakest subjects: ${weakest}`,
-      `Estimated level: ${levelBand}`,
-    ].join("\n");
+    return "Candidate profile is unavailable. Ask 3 quick diagnostic questions (target role/exam, strongest topic, weakest topic), then adapt mentoring plan from their answers.";
   }
 
-  const studyInstructions = studyContext
-    ? [
-        "",
-        "--- STUDY MATERIAL CONTEXT ---",
-        `Current Subject: ${studyContext.subject}`,
-        `Current Chapter: ${studyContext.currentChapter?.number}. ${studyContext.currentChapter?.title}`,
-        `Current Topic: ${studyContext.currentTopic?.title}`,
-        `Topic Content: ${studyContext.currentTopic?.content}`,
-        `Overall Progress: ${studyContext.progressPercent}% (${studyContext.totalChapters} chapters total)`,
-        "",
-        "Mentoring Goal:",
-        `- Guide the candidate through "${studyContext.currentTopic?.title}".`,
-        "- Explain the content clearly, using LaTeX for formulas.",
-        "- Once you feel they have understood this topic, conclude it clearly (e.g. 'Great, let's move to the next topic') and the system will advance the progress.",
-        "------------------------------",
-      ].join("\n")
-    : "";
+  const marks = {
+    physics: profile?.marks?.physics,
+    chemistry: profile?.marks?.chemistry,
+    maths: profile?.marks?.maths,
+    biology: profile?.marks?.biology,
+  };
+  const ranked = rankSubjects(marks);
+  const strongest = ranked.strongest.map(([subject, score]) => `${subject} (${score})`).join(", ") || "N/A";
+  const weakest = ranked.weakest.map(([subject, score]) => `${subject} (${score})`).join(", ") || "N/A";
+  const avg =
+    ranked.all.length > 0
+      ? Number((ranked.all.reduce((sum, [, score]) => sum + score, 0) / ranked.all.length).toFixed(1))
+      : null;
+
+  let levelBand = "beginner";
+  if (avg != null && avg >= 85) levelBand = "advanced";
+  else if (avg != null && avg >= 70) levelBand = "intermediate";
 
   return [
-    baseInstructions,
-    studyInstructions,
+    `Candidate name: ${profile.firstName || profile.name || "Candidate"}`,
+    `Class: ${profile.class ?? "N/A"}, Stream: ${profile.stream || "N/A"}, Entrance Exam: ${profile.entranceExam || "N/A"}`,
+    `Subject marks: Physics=${marks.physics ?? "N/A"}, Chemistry=${marks.chemistry ?? "N/A"}, Maths=${marks.maths ?? "N/A"}, Biology=${marks.biology ?? "N/A"}, CGPA10=${profile.cgpa10 ?? "N/A"}`,
+    `Strongest subjects: ${strongest}`,
+    `Weakest subjects: ${weakest}`,
+    `Estimated level: ${levelBand}`,
     "Mentoring behavior rules:",
     "- Personalize examples using strong subjects first, then bridge into weak subjects.",
     "- Spend more time on weakest two subjects with simpler step-by-step explanations.",
     "- Ask short check questions to validate understanding before moving on.",
     "- Give a practical micro-study plan (today, this week) tailored to weakest subjects.",
     "- Keep guidance concise, actionable, and confidence-building.",
-    "- **Output plain text ONLY.** Absolutely no Markdown (e.g., **, ###, etc.).",
   ].join("\n");
 }
 
@@ -190,6 +164,63 @@ function isBeyConcurrencyError(error) {
   const statusCode = Number(error?.statusCode || 0);
   const body = String(error?.body?.error || error?.body || "");
   return statusCode === 429 || body.toLowerCase().includes("concurrency limit");
+}
+
+function isBeyTimeoutError(error) {
+  const name = String(error?.name || "").toLowerCase();
+  const message = String(error?.message || "").toLowerCase();
+  return name.includes("timeout") || message.includes("timeout");
+}
+
+function getBeyRoomStartState(roomName) {
+  const key = String(roomName || "").trim() || "__default__";
+  let state = beyStartStateByRoom.get(key);
+  if (!state) {
+    state = { inFlight: false, cooldownUntil: 0, failureCount: 0 };
+    beyStartStateByRoom.set(key, state);
+  }
+  return { key, state };
+}
+
+function tryAcquireBeyStart(roomName) {
+  const now = Date.now();
+  const { key, state } = getBeyRoomStartState(roomName);
+  if (state.inFlight) {
+    return { allowed: false, reason: "in_flight", waitMs: 0 };
+  }
+  if (state.cooldownUntil > now) {
+    return {
+      allowed: false,
+      reason: "cooldown",
+      waitMs: Math.max(0, state.cooldownUntil - now),
+    };
+  }
+  state.inFlight = true;
+  beyStartStateByRoom.set(key, state);
+  return { allowed: true, key };
+}
+
+function releaseBeyStart(roomKey, error = null) {
+  const now = Date.now();
+  const state = beyStartStateByRoom.get(roomKey);
+  if (!state) return;
+  state.inFlight = false;
+  if (!error) {
+    state.failureCount = 0;
+    state.cooldownUntil = 0;
+    beyStartStateByRoom.set(roomKey, state);
+    return;
+  }
+
+  state.failureCount += 1;
+  const isRetryableBeyFailure = isBeyConcurrencyError(error) || isBeyTimeoutError(error);
+  const step = isRetryableBeyFailure ? 1.8 : 1.4;
+  const cooldownMs = Math.min(
+    beyCooldownMaxMs,
+    Math.round(beyCooldownBaseMs * Math.pow(step, Math.max(0, state.failureCount - 1))),
+  );
+  state.cooldownUntil = now + cooldownMs;
+  beyStartStateByRoom.set(roomKey, state);
 }
 
 function extractUserIdFromRoomName(roomName) {
@@ -218,42 +249,11 @@ async function markTrainingCompletionInternally(roomName, isLastQuestion) {
   }
 }
 
-async function detectTopicCompletionInternally(text) {
-  const transcript = String(text || "").trim();
-  if (!transcript || !internalApiKey) return false;
-  // Simple heuristic for now, or could use another LLM call
-  const conclusionPhrases = [
-    "move to the next topic",
-    "completed this topic",
-    "finished this topic",
-    "let's move on",
-    "heading to the next chapter",
-  ];
-  const matched = conclusionPhrases.some((p) => transcript.toLowerCase().includes(p));
-  return matched;
-}
-
-async function markTopicCompletedInternally(userId) {
-  if (!userId || !internalApiKey) return;
-  try {
-    await fetch(`${apiBaseUrl}/internal/training/complete-topic`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-internal-key": internalApiKey,
-      },
-      body: JSON.stringify({ userId }),
-    });
-  } catch (error) {
-    console.warn("[worker] failed to mark topic completed", error);
-  }
-}
-
-async function detectAssessmentStartIntentInternally(text) {
+async function detectEndIntentInternally(text) {
   const transcript = String(text || "").trim();
   if (!transcript || !internalApiKey) return false;
   try {
-    const response = await fetch(`${apiBaseUrl}/internal/assessment/start-intent`, {
+    const response = await fetch(`${apiBaseUrl}/internal/training/end-intent`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -263,33 +263,9 @@ async function detectAssessmentStartIntentInternally(text) {
     });
     if (!response.ok) return false;
     const payload = await response.json().catch(() => ({}));
-    return Boolean(payload?.startAssessment);
+    return Boolean(payload?.endIntent);
   } catch {
     return false;
-  }
-}
-
-async function buildAssessmentQuestionsInternally(userId) {
-  const safeUserId = String(userId || "").trim();
-  if (!safeUserId || !internalApiKey) return null;
-  try {
-    const response = await fetch(`${apiBaseUrl}/internal/assessment/questions`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-internal-key": internalApiKey,
-      },
-      body: JSON.stringify({ userId: safeUserId }),
-    });
-    if (!response.ok) return null;
-    const payload = await response.json().catch(() => ({}));
-    const questions = Array.isArray(payload?.questions) ? payload.questions : [];
-    return {
-      title: String(payload?.title || "Quick Assessment"),
-      questions,
-    };
-  } catch {
-    return null;
   }
 }
 
@@ -334,7 +310,7 @@ async function storeConversationMessageInternally({ userId, roomName, role, text
   }
 }
 
-function forwardAssistantChatToRoom(session, room, aiSpeechIdRef, trainingStateRef, userId, studyContext) {
+function forwardAssistantChatToRoom(session, room, aiSpeechIdRef, trainingStateRef, userId) {
   const { SpeechCreated } = voice.AgentSessionEventTypes;
   const forwardedItemIds = new Set();
   let completionEventSent = false;
@@ -357,7 +333,7 @@ function forwardAssistantChatToRoom(session, room, aiSpeechIdRef, trainingStateR
       aiSpeechIdRef.current = speechHandle.id;
     }
 
-    speechHandle.addDoneCallback(async () => {
+    speechHandle.addDoneCallback(() => {
       const wasInterrupted =
         safeFlagValue(speechHandle?.interrupted) ||
         safeFlagValue(speechHandle?.isInterrupted) ||
@@ -374,13 +350,7 @@ function forwardAssistantChatToRoom(session, room, aiSpeechIdRef, trainingStateR
               .catch((error) => console.error("sendText failed", error));
           }
         }
-        
-        const isTopicConclusion = !wasInterrupted && (await detectTopicCompletionInternally(text));
-        if (isTopicConclusion) {
-          await markTopicCompletedInternally(userId);
-        }
-
-        const isLastQuestion = studyContext?.isCompleted || false;
+        const isLastQuestion = false;
         publishJson(room, "mentor.ai.transcript", {
           type: "assistant_transcript",
           id: speechHandle.id,
@@ -409,7 +379,7 @@ function forwardAssistantChatToRoom(session, room, aiSpeechIdRef, trainingStateR
           publishJson(room, "mentor.training.status", {
             type: "training_completion_reached",
             id: speechHandle.id,
-            sectionTitle: "Study plan completed",
+            sectionTitle: "Continuous mentoring mode",
             timestamp: Date.now(),
           });
         }
@@ -485,40 +455,6 @@ export default defineAgent({
             });
           })();
         }
-        void (async () => {
-          const shouldStartAssessment = await detectAssessmentStartIntentInternally(transcript);
-          if (!shouldStartAssessment) return;
-          const now = Date.now();
-          const generated = await buildAssessmentQuestionsInternally(userId);
-          const generatedQuestions = Array.isArray(generated?.questions) ? generated.questions : [];
-          const fallbackQuestions = [
-            {
-              id: "q1",
-              question: "Which law explains the relation F = m * a?",
-              options: ["Newton's First Law", "Newton's Second Law", "Newton's Third Law", "Law of Gravitation"],
-              correctAnswer: "Newton's Second Law",
-            },
-            {
-              id: "q2",
-              question: "What is the SI unit of force?",
-              options: ["Joule", "Newton", "Pascal", "Watt"],
-              correctAnswer: "Newton",
-            },
-            {
-              id: "q3",
-              question: "Which quantity has both magnitude and direction?",
-              options: ["Speed", "Distance", "Scalar", "Velocity"],
-              correctAnswer: "Velocity",
-            },
-          ];
-          publishJson(ctx.room, "mentor.assessment", {
-            type: "assessment_start",
-            title: generated?.title || "Quick Assessment",
-            questions: generatedQuestions.length > 0 ? generatedQuestions : fallbackQuestions,
-            triggeredBy: transcript,
-            timestamp: now,
-          });
-        })();
         userTurnSeq += 1;
         lastInterimTranscript = "";
         lastInterimAtMs = 0;
@@ -560,11 +496,11 @@ export default defineAgent({
     await ctx.connect();
 
     const userId = extractUserIdFromRoomName(ctx.room?.name || "");
-    const { profile, studyContext } = await fetchCandidateProfileInternally(userId);
-    const adaptiveInstructions = buildAdaptiveMentorInstructions(profile, studyContext);
+    const candidateProfile = await fetchCandidateProfileInternally(userId);
+    const adaptiveInstructions = buildAdaptiveMentorInstructions(candidateProfile);
 
     const aiSpeechIdRef = { current: null };
-    forwardAssistantChatToRoom(session, ctx.room, aiSpeechIdRef, trainingStateRef, userId, studyContext);
+    forwardAssistantChatToRoom(session, ctx.room, aiSpeechIdRef, trainingStateRef, userId);
 
     await session.start({
       room: ctx.room,
@@ -594,17 +530,34 @@ export default defineAgent({
       avatarParticipantName: "Beyond Presence Avatar",
     });
 
-    try {
-      await avatar.start(session, ctx.room, {
-        livekitUrl: process.env.LIVEKIT_URL,
-        livekitApiKey: process.env.LIVEKIT_API_KEY,
-        livekitApiSecret: process.env.LIVEKIT_API_SECRET,
-      });
-    } catch (error) {
-      if (isBeyConcurrencyError(error)) {
-        console.warn("[BEY] Avatar start skipped due to concurrency limit. Continuing voice-only session.");
+    const beyStart = tryAcquireBeyStart(ctx.room?.name || "");
+    if (!beyStart.allowed) {
+      if (beyStart.reason === "in_flight") {
+        console.warn("[BEY] Avatar start skipped; another start attempt is already running for this room.");
       } else {
-        console.warn("[BEY] Avatar start failed. Continuing voice-only session:", error?.message || error);
+        console.warn(
+          `[BEY] Avatar start skipped due to cooldown (${Math.ceil((beyStart.waitMs || 0) / 1000)}s remaining).`,
+        );
+      }
+    } else {
+      let avatarStartError = null;
+      try {
+        await avatar.start(session, ctx.room, {
+          livekitUrl: process.env.LIVEKIT_URL,
+          livekitApiKey: process.env.LIVEKIT_API_KEY,
+          livekitApiSecret: process.env.LIVEKIT_API_SECRET,
+        });
+      } catch (error) {
+        avatarStartError = error;
+        if (isBeyConcurrencyError(error)) {
+          console.warn("[BEY] Avatar start skipped due to concurrency limit. Continuing voice-only session.");
+        } else if (isBeyTimeoutError(error)) {
+          console.warn("[BEY] Avatar start timed out. Continuing voice-only session.");
+        } else {
+          console.warn("[BEY] Avatar start failed. Continuing voice-only session:", error?.message || error);
+        }
+      } finally {
+        releaseBeyStart(beyStart.key, avatarStartError);
       }
     }
 
@@ -613,8 +566,8 @@ export default defineAgent({
     try {
       session.generateReply({
         instructions: isResumeSession
-          ? "Welcome them back warmly and clearly say you are resuming from where they left off in the previous session. Briefly summarize likely focus areas from prior mentoring context (weakest two subjects), then ask what they want to continue with first. Keep it concise, calm, and supportive. Use plain text only, no Markdown."
-          : "Welcome them warmly to the AI Mentor session with a personalized opening that references their current academic level and two weakest subjects. Mention that they can ask unlimited doubts. Speak clearly and a bit slower than normal, with a calm tone. End with a doubt-focused check-in like 'Any other doubt you have?'. Use plain text only, no Markdown.",
+          ? "Welcome them back warmly and clearly say you are resuming from where they left off in the previous session. Briefly summarize likely focus areas from prior mentoring context (weakest two subjects), then ask what they want to continue with first. Keep it concise, calm, and supportive."
+          : "Welcome them warmly to the AI Mentor session with a personalized opening that references their current academic level and two weakest subjects. Mention that they can ask unlimited doubts. Speak clearly and a bit slower than normal, with a calm tone. End with a doubt-focused check-in like 'Any other doubt you have?'.",
       });
     } catch (error) {
       console.warn("[AGENT] Skipped initial greeting because session is no longer running:", error?.message || error);
