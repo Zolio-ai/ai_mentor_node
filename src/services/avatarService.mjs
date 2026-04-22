@@ -17,6 +17,10 @@ async function createLivekitToken({ identity, name, roomName, livekitApiKey, liv
   return token.toJwt();
 }
 
+const SESSION_DEDUPE_TTL_MS = 8000;
+const recentSessions = new Map();
+const inFlightSessions = new Map();
+
 export function createAvatarService(deps) {
   const {
     roomServiceClient,
@@ -28,13 +32,7 @@ export function createAvatarService(deps) {
     avatarIdentity,
   } = deps;
 
-  const createSession = async (user) => {
-    if (!roomServiceClient || !agentDispatchClient) {
-      throw createHttpError(500, "LiveKit is not configured.");
-    }
-
-    const roomName = `mentor-${user.sub}`;
-    const userIdentity = `user-${user.sub}`;
+  const buildSessionForRoom = async (user, roomName, userIdentity) => {
     try {
       await roomServiceClient.createRoom({
         name: roomName,
@@ -46,13 +44,33 @@ export function createAvatarService(deps) {
     }
 
     const existingDispatches = await agentDispatchClient.listDispatch(roomName);
-    const sameAgentDispatches = existingDispatches.filter((dispatch) => dispatch.agentName === livekitAgentName);
-    for (const dispatch of sameAgentDispatches) {
-      try {
-        await agentDispatchClient.deleteDispatch(dispatch.id, roomName);
-      } catch {
-        // ignore stale delete failures
+    const sameAgentDispatches = existingDispatches.filter(
+      (dispatch) => dispatch.agentName === livekitAgentName,
+    );
+
+    // Reuse any existing dispatch — its presence means an agent job is already
+    // in flight. Creating another stampedes Bey and exhausts concurrency.
+    if (sameAgentDispatches.length > 0) {
+      const participants = await roomServiceClient.listParticipants(roomName).catch(() => []);
+      const staleUser = participants.find((p) => p.identity === userIdentity);
+      if (staleUser) {
+        await roomServiceClient.removeParticipant(roomName, userIdentity).catch(() => {});
       }
+      const participantToken = await createLivekitToken({
+        identity: userIdentity,
+        name: user.name || "AI Mentor User",
+        roomName,
+        livekitApiKey,
+        livekitApiSecret,
+      });
+      return {
+        roomName,
+        livekitUrl,
+        participantToken,
+        dispatchAgent: livekitAgentName,
+        dispatchId: sameAgentDispatches[0].id,
+        reused: true,
+      };
     }
 
     const staleParticipants = await roomServiceClient.listParticipants(roomName).catch(() => []);
@@ -89,6 +107,39 @@ export function createAvatarService(deps) {
     };
   };
 
+  const createSession = async (user) => {
+    if (!roomServiceClient || !agentDispatchClient) {
+      throw createHttpError(500, "LiveKit is not configured.");
+    }
+
+    const roomName = `mentor-${user.sub}`;
+    const userIdentity = `user-${user.sub}`;
+
+    const cached = recentSessions.get(roomName);
+    if (cached && cached.expiresAt > Date.now()) {
+      return cached.response;
+    }
+
+    const inFlight = inFlightSessions.get(roomName);
+    if (inFlight) return inFlight;
+
+    const work = (async () => {
+      try {
+        const response = await buildSessionForRoom(user, roomName, userIdentity);
+        recentSessions.set(roomName, {
+          expiresAt: Date.now() + SESSION_DEDUPE_TTL_MS,
+          response,
+        });
+        return response;
+      } finally {
+        inFlightSessions.delete(roomName);
+      }
+    })();
+
+    inFlightSessions.set(roomName, work);
+    return work;
+  };
+
   const endSession = async (user) => {
     if (!roomServiceClient || !agentDispatchClient) {
       throw createHttpError(500, "LiveKit is not configured.");
@@ -96,6 +147,7 @@ export function createAvatarService(deps) {
 
     const roomName = `mentor-${user.sub}`;
     const userIdentity = `user-${user.sub}`;
+    recentSessions.delete(roomName);
     const existingDispatches = await agentDispatchClient.listDispatch(roomName);
     for (const dispatch of existingDispatches) {
       if (dispatch.agentName !== livekitAgentName) continue;
