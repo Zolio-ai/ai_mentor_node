@@ -19,6 +19,8 @@ const internalApiKey = process.env.INTERNAL_API_KEY || process.env.JWT_SECRET ||
 const endpointingDelayMs = Math.max(300, Number(process.env.VOICE_AGENT_ENDPOINTING_DELAY_MS || 1200));
 const userAwayTimeoutSec = Math.max(20, Number(process.env.VOICE_AGENT_USER_AWAY_TIMEOUT_SECONDS || 45));
 const closeOnDisconnect = process.env.VOICE_AGENT_CLOSE_ON_DISCONNECT === "true";
+const workerHost = process.env.WORKER_HOST || "0.0.0.0";
+const workerPort = Math.max(0, Number(process.env.WORKER_PORT || 8082));
 const mongoUri = process.env.MONGODB_URI || "";
 const mongoDbName = process.env.MONGODB_DB_NAME || "ai_mentor_app";
 let workerDbConnectPromise = null;
@@ -579,6 +581,8 @@ cli.runApp(
   new ServerOptions({
     agent: fileURLToPath(import.meta.url),
     agentName,
+    host: workerHost,
+    port: workerPort,
     requestFunc: async (job) => {
       const roomName = job.room?.name || "mentor-room";
       const safeRoom = roomName.replace(/[^a-zA-Z0-9_-]/g, "-");

@@ -17,7 +17,7 @@ module.exports = {
     {
       name: "ai-mentor-worker",
       script: "worker/main.mjs",
-      args: "start --port 8082",
+      args: "start",
       cwd: __dirname,
       interpreter: "node",
       autorestart: true,
@@ -27,6 +27,7 @@ module.exports = {
       min_uptime: "10s",
       env: {
         NODE_ENV: "production",
+        WORKER_PORT: "8082",
       },
     },
   ],
