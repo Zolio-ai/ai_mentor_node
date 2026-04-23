@@ -17,7 +17,7 @@ module.exports = {
     {
       name: "ai-mentor-worker",
       script: "worker/main.mjs",
-      args: "start",
+      args: "start --port 8082",
       cwd: __dirname,
       interpreter: "node",
       autorestart: true,
