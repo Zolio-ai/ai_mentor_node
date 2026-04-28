@@ -6,6 +6,7 @@ import {
   completeCurrentTopic,
   generateChapterAssessment,
   saveChapterAssessment,
+  getChapterAssessmentMistakes,
   getAssessmentStatuses as fetchAssessmentStatuses,
 } from "../services/studyService.mjs";
 
@@ -154,6 +155,21 @@ export const createStudyController = ({ openai, openAiModel } = {}) => {
     }
   };
 
+  const getChapterMistakes = async (req, res) => {
+    try {
+      const userId = req.user.sub;
+      const { chapterIndex } = req.params;
+      const details = await getChapterAssessmentMistakes(userId, Number(chapterIndex));
+      if (!details) {
+        return res.status(404).json({ success: false, message: "No assessment found for this chapter yet." });
+      }
+      res.status(200).json({ success: true, data: details });
+    } catch (error) {
+      console.error("Error fetching chapter mistakes:", error);
+      res.status(500).json({ success: false, message: error.message });
+    }
+  };
+
   return {
     getStudyPlans,
     getStudyMaterials,
@@ -165,5 +181,6 @@ export const createStudyController = ({ openai, openAiModel } = {}) => {
     getChapterAssessment,
     submitChapterAssessment,
     getAssessmentStatuses,
+    getChapterMistakes,
   };
 };

@@ -134,14 +134,17 @@ const studyMaterialSchema = new mongoose.Schema(
 const assessmentResultSchema = new mongoose.Schema(
   {
     userId: { type: String, required: true, index: true },
-    studyMaterialId: { type: mongoose.Schema.Types.ObjectId, ref: "StudyMaterial", required: true },
+    studyMaterialId: { type: mongoose.Schema.Types.ObjectId, ref: "StudyMaterial", default: null },
+    studyPlanId: { type: mongoose.Schema.Types.ObjectId, ref: "StudyPlan", default: null },
     chapterIndex: { type: Number, required: true },
     score: { type: Number, required: true },
     totalQuestions: { type: Number, default: 10 },
     answers: [
       {
         questionId: { type: String, required: true },
+        question: { type: String, default: "" },
         selectedOption: { type: String, required: true },
+        correctAnswer: { type: String, default: "" },
         isCorrect: { type: Boolean, required: true },
       },
     ],
@@ -153,9 +156,21 @@ const assessmentResultSchema = new mongoose.Schema(
 const studyProgressSchema = new mongoose.Schema(
   {
     userId: { type: String, required: true, index: true },
-    studyMaterialId: { type: mongoose.Schema.Types.ObjectId, ref: "StudyMaterial", required: true },
+    studyMaterialId: { type: mongoose.Schema.Types.ObjectId, ref: "StudyMaterial", default: null },
+    studyPlanId: { type: mongoose.Schema.Types.ObjectId, ref: "StudyPlan", default: null },
     currentChapterIndex: { type: Number, default: 0 },
     currentTopicIndex: { type: Number, default: 0 },
+    topicStartedAt: { type: Date, default: Date.now },
+    expectedTopicCompletionAt: { type: Date, default: null },
+    avgTopicDurationSeconds: { type: Number, default: 480 },
+    completedTopics: [
+      {
+        chapterIndex: { type: Number, required: true },
+        topicIndex: { type: Number, required: true },
+        durationSeconds: { type: Number, default: 0 },
+        completedAt: { type: Date, default: Date.now },
+      },
+    ],
     isCompleted: { type: Boolean, default: false },
     lastAccessedAt: { type: Date, default: Date.now },
   },

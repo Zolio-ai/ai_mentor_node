@@ -22,6 +22,7 @@ export const registerStudyRoutes = (app, { verifyHttpAuth, openai, openAiModel }
   // Assessment Endpoints
   app.get("/data/study/chapters/:chapterIndex/assessment", verifyHttpAuth, controller.getChapterAssessment);
   app.post("/data/study/chapters/:chapterIndex/submit", verifyHttpAuth, controller.submitChapterAssessment);
+  app.get("/data/study/chapters/:chapterIndex/mistakes", verifyHttpAuth, controller.getChapterMistakes);
   app.get("/data/study/assessment-statuses", verifyHttpAuth, controller.getAssessmentStatuses);
 
   // Internal routes for worker
