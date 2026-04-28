@@ -30,6 +30,10 @@ const beyCooldownMaxMs = Math.max(
   beyCooldownBaseMs,
   Number(process.env.BEY_START_COOLDOWN_MAX_MS || 45000),
 );
+const forceDeepgram =
+  String(process.env.USE_DEEPGRAM || "")
+    .toLowerCase()
+    .trim() === "true";
 
 function normalizeProvider(raw, fallback) {
   const provider = String(raw || fallback)
@@ -53,6 +57,7 @@ function createDeepgramTts() {
 }
 
 function resolveStt() {
+  if (forceDeepgram) return createDeepgramStt();
   const provider = normalizeProvider(process.env.VOICE_AGENT_STT_PROVIDER, "auto");
   if (provider === "deepgram") return createDeepgramStt();
   if (provider === "sarvam") return new SarvamStt();
@@ -69,6 +74,7 @@ function resolveStt() {
 }
 
 function resolveTts() {
+  if (forceDeepgram) return createDeepgramTts();
   const provider = normalizeProvider(process.env.VOICE_AGENT_TTS_PROVIDER, "auto");
   if (provider === "deepgram") return createDeepgramTts();
   if (provider === "sarvam") return new SarvamTts();
