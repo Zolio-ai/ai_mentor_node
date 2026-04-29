@@ -1,4 +1,5 @@
 import { parseAndSaveStudyPlan, parseAndSaveStudyMaterial } from "../services/parsingService.mjs";
+import { initializeTasksFromStudyPlan } from "../services/taskService.mjs";
 
 /**
  * Controller for handling parsing requests.
@@ -14,6 +15,12 @@ export const createParsingController = (openai) => {
       }
 
       const plan = await parseAndSaveStudyPlan(openai, file.buffer, file.originalname, planName);
+      
+      // Initialize tasks based on the new study plan
+      await initializeTasksFromStudyPlan(plan).catch(err => {
+        console.error("Error initializing tasks for study plan:", err);
+      });
+
       res.status(201).json({ success: true, data: plan });
     } catch (error) {
       console.error("Error parsing study plan:", error);

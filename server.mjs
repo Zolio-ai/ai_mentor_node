@@ -14,6 +14,7 @@ import { registerAvatarRoutes } from "./src/routes/registerAvatarRoutes.mjs";
 import { registerAttendanceRoutes } from "./src/routes/registerAttendanceRoutes.mjs";
 import { registerParsingRoutes } from "./src/routes/registerParsingRoutes.mjs";
 import { registerStudyRoutes } from "./src/routes/registerStudyRoutes.mjs";
+import { registerTaskRoutes } from "./src/routes/registerTaskRoutes.mjs";
 import { registerSocketHandlers } from "./src/socket/registerSocketHandlers.mjs";
 
 dotenv.config();
@@ -150,6 +151,12 @@ registerParsingRoutes(app, {
 });
 
 registerStudyRoutes(app, {
+  verifyHttpAuth,
+  openai,
+  openAiModel,
+});
+
+registerTaskRoutes(app, {
   verifyHttpAuth,
   openai,
   openAiModel,

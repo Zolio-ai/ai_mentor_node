@@ -185,3 +185,28 @@ export const StudyPlan = mongoose.model("StudyPlan", studyPlanSchema);
 export const StudyMaterial = mongoose.model("StudyMaterial", studyMaterialSchema);
 export const StudyProgress = mongoose.model("StudyProgress", studyProgressSchema);
 export const AssessmentResult = mongoose.model("AssessmentResult", assessmentResultSchema);
+
+const taskSchema = new mongoose.Schema(
+  {
+    studyPlanId: { type: mongoose.Schema.Types.ObjectId, ref: "StudyPlan", required: true, index: true },
+    topic: { type: String, required: true, trim: true },
+    weekNumber: { type: Number, default: null },
+  },
+  { timestamps: true },
+);
+
+const taskFlowSchema = new mongoose.Schema(
+  {
+    taskId: { type: mongoose.Schema.Types.ObjectId, ref: "Task", required: true, index: true },
+    studentId: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true, index: true },
+    status: {
+      type: String,
+      enum: ["not_started", "in_progress", "completed"],
+      default: "not_started",
+    },
+  },
+  { timestamps: true },
+);
+
+export const Task = mongoose.model("Task", taskSchema);
+export const TaskFlow = mongoose.model("TaskFlow", taskFlowSchema);
