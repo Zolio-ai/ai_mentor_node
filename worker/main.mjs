@@ -20,6 +20,7 @@ const endpointingDelayMs = Math.max(300, Number(process.env.VOICE_AGENT_ENDPOINT
 const userAwayTimeoutSec = Math.max(20, Number(process.env.VOICE_AGENT_USER_AWAY_TIMEOUT_SECONDS || 45));
 // Cost-safe default: always close user input/session when user disconnects.
 const closeOnDisconnect = true;
+const autoTopicAdvanceMs = 2 * 60 * 1000;
 const workerHost = process.env.WORKER_HOST || "0.0.0.0";
 const workerPort = Math.max(0, Number(process.env.WORKER_PORT || 8082));
 const mongoUri = process.env.MONGODB_URI || "";
@@ -324,6 +325,27 @@ async function detectEndIntentInternally(text) {
   }
 }
 
+async function completeTopicInternally(userId) {
+  const safeUserId = String(userId || "").trim();
+  if (!safeUserId || !internalApiKey) return;
+  try {
+    const response = await fetch(`${apiBaseUrl}/internal/training/complete-topic`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-internal-key": internalApiKey,
+      },
+      body: JSON.stringify({ userId: safeUserId }),
+    });
+    if (!response.ok) {
+      const text = await response.text().catch(() => "");
+      console.warn("[study-progress] auto complete-topic failed", response.status, text);
+    }
+  } catch (error) {
+    console.warn("[study-progress] auto complete-topic error", error?.message || error);
+  }
+}
+
 async function ensureWorkerDbConnected() {
   if (mongoose.connection.readyState === 1) return;
   if (workerDbConnectPromise) return workerDbConnectPromise;
@@ -583,6 +605,14 @@ export default defineAgent({
         closeOnDisconnect,
       },
     });
+
+    const autoTopicTimer = setInterval(() => {
+      void completeTopicInternally(userId);
+    }, autoTopicAdvanceMs);
+    const clearAutoTopicTimer = () => {
+      clearInterval(autoTopicTimer);
+    };
+    ctx.room?.on?.("disconnected", clearAutoTopicTimer);
 
     const avatar = new bey.AvatarSession({
       apiKey: process.env.BEY_API_KEY,

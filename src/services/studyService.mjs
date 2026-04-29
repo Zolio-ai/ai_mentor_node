@@ -28,28 +28,7 @@ const mapWeeksToChapters = (weeks = []) =>
       .filter((topic) => topic.title.length > 0),
   }));
 
-const getProgressChapters = (progress) => {
-  if (progress?.studyMaterialId?.chapters) {
-    return {
-      chapters: progress.studyMaterialId.chapters,
-      sourceType: "material",
-    };
-  }
-  const chapters = mapWeeksToChapters(progress?.studyPlanId?.weeks || []);
-  return { chapters, sourceType: "plan" };
-};
-
-const applyLegacyMaterialShapeFromPlan = (progress) => {
-  if (!progress || progress.studyMaterialId || !progress.studyPlanId) return progress;
-  const pseudoMaterial = {
-    _id: progress.studyPlanId._id,
-    subject: progress.studyPlanId.planName || "General Plan",
-    chapters: mapWeeksToChapters(progress.studyPlanId.weeks || []),
-    rawContent: progress.studyPlanId.rawContent || "",
-  };
-  progress.studyMaterialId = pseudoMaterial;
-  return progress;
-};
+const getProgressChapters = (progress) => mapWeeksToChapters(progress?.studyPlanId?.weeks || []);
 
 /**
  * Fetches all study plans from the database.
@@ -76,36 +55,25 @@ export const getStudyMaterialById = async (id) => {
  * Gets or creates study progress for a user.
  */
 export const getOrCreateStudyProgress = async (userId) => {
-  let progress = await StudyProgress.findOne({ userId })
-    .populate("studyMaterialId")
-    .populate("studyPlanId");
+  let progress = await StudyProgress.findOne({ userId }).populate("studyPlanId");
   if (!progress) {
-    // Prefer StudyPlan matching user's stream/track name.
+    // Assign StudyPlan matching user's stream/track name.
     const user = await User.findById(userId);
     const stream = user?.stream || "General";
     let plan = await StudyPlan.findOne({ planName: new RegExp(stream, "i") });
     if (!plan) plan = await StudyPlan.findOne({});
-
-    // Backward compatibility fallback.
-    let material = null;
-    if (!plan) {
-      material = await StudyMaterial.findOne({ subject: new RegExp(stream, "i") });
-      if (!material) material = await StudyMaterial.findOne({});
-    }
-
     const assignedPlanId = plan?._id || null;
-    const assignedMaterialId = material?._id || null;
-    if (assignedPlanId || assignedMaterialId) {
+    if (assignedPlanId) {
       const now = new Date();
       progress = await StudyProgress.create({
         userId,
         studyPlanId: assignedPlanId,
-        studyMaterialId: assignedMaterialId,
+        studyMaterialId: null,
         topicStartedAt: now,
         avgTopicDurationSeconds: DEFAULT_TOPIC_DURATION_SECONDS,
         expectedTopicCompletionAt: computeExpectedCompletionAt(now, DEFAULT_TOPIC_DURATION_SECONDS),
       });
-      progress = await progress.populate("studyMaterialId").populate("studyPlanId");
+      progress = await progress.populate("studyPlanId");
     }
   } else {
     let shouldSave = false;
@@ -118,6 +86,10 @@ export const getOrCreateStudyProgress = async (userId) => {
         progress.studyPlanId = plan._id;
         shouldSave = true;
       }
+    }
+    if (progress.studyMaterialId) {
+      progress.studyMaterialId = null;
+      shouldSave = true;
     }
     if (!progress.topicStartedAt) {
       progress.topicStartedAt = new Date();
@@ -139,7 +111,7 @@ export const getOrCreateStudyProgress = async (userId) => {
       await progress.populate("studyPlanId");
     }
   }
-  return applyLegacyMaterialShapeFromPlan(progress);
+  return progress;
 };
 
 /**
@@ -169,12 +141,10 @@ export const updateStudyProgress = async (userId, chapterIndex, topicIndex) => {
  * Marks a topic as completed and moves to the next one.
  */
 export const completeCurrentTopic = async (userId) => {
-  let progress = await StudyProgress.findOne({ userId })
-    .populate("studyMaterialId")
-    .populate("studyPlanId");
+  let progress = await StudyProgress.findOne({ userId }).populate("studyPlanId");
   if (!progress) return null;
 
-  const { chapters } = getProgressChapters(progress);
+  const chapters = getProgressChapters(progress);
   const currentChapter = chapters[progress.currentChapterIndex];
   if (!currentChapter) return progress;
 
@@ -229,7 +199,7 @@ export const completeCurrentTopic = async (userId) => {
     : computeExpectedCompletionAt(now, progress.avgTopicDurationSeconds);
   progress.lastAccessedAt = now;
   await progress.save();
-  return applyLegacyMaterialShapeFromPlan(progress);
+  return progress;
 };
 
 /**
@@ -263,7 +233,7 @@ export const generateChapterAssessment = async (userId, chapterIndex, { openai, 
   const progress = await getOrCreateStudyProgress(userId);
   if (!progress) throw new Error("No study plan assigned.");
 
-  const { chapters } = getProgressChapters(progress);
+  const chapters = getProgressChapters(progress);
   const chapter = chapters[chapterIndex];
   if (!chapter) throw new Error(`Chapter at index ${chapterIndex} not found.`);
 
@@ -311,6 +281,8 @@ export const generateChapterAssessment = async (userId, chapterIndex, { openai, 
 export const saveChapterAssessment = async (userId, chapterIndex, userAnswers) => {
   const progress = await getOrCreateStudyProgress(userId);
   if (!progress) throw new Error("No study plan assigned.");
+  const studyPlanId = progress?.studyPlanId?._id || null;
+  if (!studyPlanId) throw new Error("Study plan is missing for this user.");
   
   // Calculate score
   let score = 0;
@@ -333,9 +305,7 @@ export const saveChapterAssessment = async (userId, chapterIndex, userAnswers) =
   const query = {
     userId,
     chapterIndex,
-    ...(progress?.studyPlanId?._id
-      ? { studyPlanId: progress.studyPlanId._id }
-      : { studyMaterialId: progress?.studyMaterialId?._id }),
+    studyPlanId,
   };
   const existing = await AssessmentResult.findOne(query);
   if (existing) {
@@ -348,8 +318,8 @@ export const saveChapterAssessment = async (userId, chapterIndex, userAnswers) =
 
   const newResult = await AssessmentResult.create({
     userId,
-    studyMaterialId: progress?.studyMaterialId?._id || null,
-    studyPlanId: progress?.studyPlanId?._id || null,
+    studyMaterialId: null,
+    studyPlanId,
     chapterIndex,
     score,
     totalQuestions: processedAnswers.length || 10,
@@ -363,15 +333,13 @@ export const saveChapterAssessment = async (userId, chapterIndex, userAnswers) =
 export const getChapterAssessmentMistakes = async (userId, chapterIndex) => {
   const progress = await getOrCreateStudyProgress(userId);
   if (!progress) return null;
+  const studyPlanId = progress?.studyPlanId?._id || null;
+  if (!studyPlanId) return null;
 
   const query = {
     userId,
     chapterIndex,
-    ...(progress?.studyPlanId?._id
-      ? { studyPlanId: progress.studyPlanId._id }
-      : progress?.studyMaterialId?._id
-        ? { studyMaterialId: progress.studyMaterialId._id }
-        : {}),
+    studyPlanId,
   };
 
   const latestResult = await AssessmentResult.findOne(query).sort({ updatedAt: -1 }).lean();
@@ -396,18 +364,15 @@ export const getChapterAssessmentMistakes = async (userId, chapterIndex) => {
 };
 
 /**
- * Retrieves assessment statuses for all chapters of the current material.
+ * Retrieves assessment statuses for all chapters of the current study plan.
  */
 export const getAssessmentStatuses = async (userId) => {
   const progress = await getOrCreateStudyProgress(userId);
   if (!progress) return [];
+  const studyPlanId = progress?.studyPlanId?._id || null;
+  if (!studyPlanId) return [];
 
-  const query = progress?.studyPlanId?._id
-    ? { userId, studyPlanId: progress.studyPlanId._id }
-    : progress?.studyMaterialId?._id
-      ? { userId, studyMaterialId: progress.studyMaterialId._id }
-      : null;
-  if (!query) return [];
+  const query = { userId, studyPlanId };
 
   const results = await AssessmentResult.find(query).lean();
 

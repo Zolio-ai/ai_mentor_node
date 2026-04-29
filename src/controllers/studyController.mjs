@@ -79,26 +79,29 @@ export const createStudyController = ({ openai, openAiModel } = {}) => {
     try {
       const { userId } = req.params;
       const progress = await getOrCreateStudyProgress(userId);
-      if (!progress || !progress.studyMaterialId) {
+      if (!progress || !progress.studyPlanId) {
         return res.status(200).json({ ok: true, studyContext: null });
       }
 
-      const material = progress.studyMaterialId;
-      const chapter = material.chapters[progress.currentChapterIndex];
-      const topic = chapter?.topics[progress.currentTopicIndex];
+      const plan = progress.studyPlanId;
+      const weeks = Array.isArray(plan?.weeks) ? plan.weeks : [];
+      const chapter = weeks[progress.currentChapterIndex];
+      const topicTitle = Array.isArray(chapter?.topics) ? chapter.topics[progress.currentTopicIndex] : "";
 
       res.status(200).json({
         ok: true,
         studyContext: {
-          materialId: material._id,
-          subject: material.subject,
+          planId: plan._id,
+          subject: plan.planName || "General Plan",
           currentChapter: {
-            title: chapter?.chapterTitle,
-            number: chapter?.chapterNumber,
+            title: chapter?.title,
+            number: chapter?.weekNumber,
           },
-          currentTopic: topic,
-          totalChapters: material.chapters.length,
-          progressPercent: Math.round(((progress.currentChapterIndex + 1) / material.chapters.length) * 100),
+          currentTopic: {
+            title: String(topicTitle || "").trim(),
+          },
+          totalChapters: weeks.length,
+          progressPercent: weeks.length > 0 ? Math.round(((progress.currentChapterIndex + 1) / weeks.length) * 100) : 0,
           isCompleted: progress.isCompleted,
         },
       });
