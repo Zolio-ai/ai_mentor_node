@@ -18,6 +18,7 @@ async function createLivekitToken({ identity, name, roomName, livekitApiKey, liv
 }
 
 const SESSION_DEDUPE_TTL_MS = 45000;
+const ROOM_EMPTY_TIMEOUT_SECONDS = 120;
 const recentSessions = new Map();
 const inFlightSessions = new Map();
 
@@ -36,7 +37,7 @@ export function createAvatarService(deps) {
     try {
       await roomServiceClient.createRoom({
         name: roomName,
-        emptyTimeout: 60 * 10,
+        emptyTimeout: ROOM_EMPTY_TIMEOUT_SECONDS,
         maxParticipants: 6,
       });
     } catch (error) {
@@ -168,6 +169,14 @@ export function createAvatarService(deps) {
       } catch {
         // ignore remove failures
       }
+    }
+    try {
+      const remainingParticipants = await roomServiceClient.listParticipants(roomName).catch(() => []);
+      if (remainingParticipants.length === 0) {
+        await roomServiceClient.deleteRoom(roomName);
+      }
+    } catch {
+      // ignore delete-room failures
     }
     return { ok: true, roomName };
   };

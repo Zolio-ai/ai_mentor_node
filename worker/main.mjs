@@ -18,7 +18,8 @@ const apiBaseUrl = process.env.API_BASE_URL || "http://localhost:4000";
 const internalApiKey = process.env.INTERNAL_API_KEY || process.env.JWT_SECRET || "";
 const endpointingDelayMs = Math.max(300, Number(process.env.VOICE_AGENT_ENDPOINTING_DELAY_MS || 1200));
 const userAwayTimeoutSec = Math.max(20, Number(process.env.VOICE_AGENT_USER_AWAY_TIMEOUT_SECONDS || 45));
-const closeOnDisconnect = process.env.VOICE_AGENT_CLOSE_ON_DISCONNECT === "true";
+// Cost-safe default: always close user input/session when user disconnects.
+const closeOnDisconnect = true;
 const workerHost = process.env.WORKER_HOST || "0.0.0.0";
 const workerPort = Math.max(0, Number(process.env.WORKER_PORT || 8082));
 const mongoUri = process.env.MONGODB_URI || "";
@@ -572,6 +573,9 @@ export default defineAgent({
     const isResumeSession = await hasConversationHistory(userId);
 
     try {
+      // Let avatar/audio subscriptions settle before first greeting so resume voice
+      // does not get dropped on fast reconnects.
+      await new Promise((resolve) => setTimeout(resolve, 1200));
       session.generateReply({
         instructions: isResumeSession
           ? "Welcome them back warmly and clearly say you are resuming from where they left off in the previous session. Briefly summarize likely focus areas from prior mentoring context (weakest two subjects), then ask what they want to continue with first. Keep it concise, calm, and supportive."
