@@ -119,7 +119,23 @@ async function fetchCandidateProfileInternally(userId) {
   }
 }
 
-function buildAdaptiveMentorInstructions(profile) {
+async function fetchStudyContextInternally(userId) {
+  if (!userId || !internalApiKey) return null;
+  try {
+    const response = await fetch(`${apiBaseUrl}/internal/candidates/${userId}/study-context`, {
+      headers: {
+        "x-internal-key": internalApiKey,
+      },
+    });
+    if (!response.ok) return null;
+    const payload = await response.json().catch(() => ({}));
+    return payload?.studyContext || null;
+  } catch {
+    return null;
+  }
+}
+
+function buildAdaptiveMentorInstructions(profile, studyContext = null) {
   if (!profile) {
     return "Candidate profile is unavailable. Ask 3 quick diagnostic questions (target role/exam, strongest topic, weakest topic), then adapt mentoring plan from their answers.";
   }
@@ -142,6 +158,23 @@ function buildAdaptiveMentorInstructions(profile) {
   if (avg != null && avg >= 85) levelBand = "advanced";
   else if (avg != null && avg >= 70) levelBand = "intermediate";
 
+  const studyContextLines = [];
+  if (studyContext?.currentChapter?.title || studyContext?.currentTopic?.title) {
+    const chapterTitle = String(studyContext?.currentChapter?.title || "Current chapter").trim();
+    const topicTitle = String(studyContext?.currentTopic?.title || "Current topic").trim();
+    const subject = String(studyContext?.subject || "Current subject").trim();
+    studyContextLines.push(
+      `Current study-plan subject: ${subject}`,
+      `Current study-plan chapter: ${chapterTitle}`,
+      `Current study-plan topic: ${topicTitle}`,
+      "Topic-priority mentoring rules:",
+      "- Prioritize doubts from the current study-plan topic before switching to other topics.",
+      "- If learner asks unrelated question, answer briefly and then bring them back to current topic doubts.",
+      "- At the end of each response, ask one short doubt-check specifically about current chapter/topic.",
+      '- Use natural prompts like: "Any doubts in this topic?" or "Any confusion in this chapter point?".',
+    );
+  }
+
   return [
     `Candidate name: ${profile.firstName || profile.name || "Candidate"}`,
     `Class: ${profile.class ?? "N/A"}, Stream: ${profile.stream || "N/A"}, Entrance Exam: ${profile.entranceExam || "N/A"}`,
@@ -155,6 +188,7 @@ function buildAdaptiveMentorInstructions(profile) {
     "- Ask short check questions to validate understanding before moving on.",
     "- Give a practical micro-study plan (today, this week) tailored to weakest subjects.",
     "- Keep guidance concise, actionable, and confidence-building.",
+    ...studyContextLines,
   ].join("\n");
 }
 
@@ -167,6 +201,18 @@ function publishJson(room, topic, data) {
   } catch (error) {
     console.error("publishJson failed", error);
   }
+}
+
+function sanitizeAssistantText(rawText) {
+  const text = String(rawText || "");
+  if (!text) return "";
+  return text
+    .replace(/\*\*(.*?)\*\*/g, "$1")
+    .replace(/__(.*?)__/g, "$1")
+    .replace(/^[\s>*#-]+/gm, "")
+    .replace(/`+/g, "")
+    .replace(/\s{2,}/g, " ")
+    .trim();
 }
 
 function isBeyConcurrencyError(error) {
@@ -353,17 +399,21 @@ function forwardAssistantChatToRoom(session, room, aiSpeechIdRef, trainingStateR
         if (!text && !wasInterrupted) continue;
         if (text && !forwardedItemIds.has(item.id)) {
           forwardedItemIds.add(item.id);
+          const cleanedText = sanitizeAssistantText(text);
           if (!wasInterrupted) {
             void room.localParticipant
-              ?.sendText?.(text, { topic: "lk.chat" })
+              ?.sendText?.(cleanedText, { topic: "lk.chat" })
               .catch((error) => console.error("sendText failed", error));
+          }
+          if (cleanedText !== text) {
+            item.textContent = cleanedText;
           }
         }
         const isLastQuestion = false;
         publishJson(room, "mentor.ai.transcript", {
           type: "assistant_transcript",
           id: speechHandle.id,
-          text,
+          text: sanitizeAssistantText(text),
           isLastQuestion,
           partial: false,
           interrupted: wasInterrupted,
@@ -506,7 +556,8 @@ export default defineAgent({
 
     const userId = extractUserIdFromRoomName(ctx.room?.name || "");
     const candidateProfile = await fetchCandidateProfileInternally(userId);
-    const adaptiveInstructions = buildAdaptiveMentorInstructions(candidateProfile);
+    const studyContext = await fetchStudyContextInternally(userId);
+    const adaptiveInstructions = buildAdaptiveMentorInstructions(candidateProfile, studyContext);
 
     const aiSpeechIdRef = { current: null };
     forwardAssistantChatToRoom(session, ctx.room, aiSpeechIdRef, trainingStateRef, userId);
@@ -518,6 +569,7 @@ export default defineAgent({
         publishPartial: (data) =>
           publishJson(ctx.room, "mentor.ai.transcript", {
             ...data,
+            text: sanitizeAssistantText(data?.text),
             isLastQuestion: false,
           }),
         additionalInstructions: adaptiveInstructions,
@@ -576,10 +628,16 @@ export default defineAgent({
       // Let avatar/audio subscriptions settle before first greeting so resume voice
       // does not get dropped on fast reconnects.
       await new Promise((resolve) => setTimeout(resolve, 1200));
+      const chapterTitle = String(studyContext?.currentChapter?.title || "").trim();
+      const topicTitle = String(studyContext?.currentTopic?.title || "").trim();
+      const studyFocusPrompt =
+        chapterTitle || topicTitle
+          ? `Their current study plan focus is chapter "${chapterTitle || "current chapter"}" and topic "${topicTitle || "current topic"}". Ask if they have any doubts specifically in this chapter/topic and start from there.`
+          : "Ask what topic from their current study plan they want to clear doubts in first.";
       session.generateReply({
         instructions: isResumeSession
-          ? "Welcome them back warmly and clearly say you are resuming from where they left off in the previous session. Briefly summarize likely focus areas from prior mentoring context (weakest two subjects), then ask what they want to continue with first. Keep it concise, calm, and supportive."
-          : "Welcome them warmly to the AI Mentor session with a personalized opening that references their current academic level and two weakest subjects. Mention that they can ask unlimited doubts. Speak clearly and a bit slower than normal, with a calm tone. End with a doubt-focused check-in like 'Any other doubt you have?'.",
+          ? `Welcome them back warmly and clearly say you are resuming from where they left off in the previous session. Briefly summarize likely focus areas from prior mentoring context (weakest two subjects). ${studyFocusPrompt} Keep it concise, calm, and supportive.`
+          : `Welcome them warmly to the AI Mentor session with a personalized opening that references their current academic level and two weakest subjects. Mention that they can ask unlimited doubts. ${studyFocusPrompt} Speak clearly and a bit slower than normal, with a calm tone.`,
       });
     } catch (error) {
       console.warn("[AGENT] Skipped initial greeting because session is no longer running:", error?.message || error);
