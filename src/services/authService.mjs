@@ -100,6 +100,7 @@ export function createAuthService(deps) {
     const stream = String(payload?.stream || "").trim().toLowerCase();
     const studentClass = Number(payload?.class);
     const password = String(payload?.password || "");
+    const role = String(payload?.role || "student").trim().toLowerCase();
 
     if (!firstName || !lastName || !email || !password) {
       throw createHttpError(400, "firstName, lastName, email and password are required.");
@@ -125,6 +126,7 @@ export function createAuthService(deps) {
       phonenumber,
       stream,
       class: studentClass,
+      role,
       onboardingCompleted: false,
       passwordHash: hashPassword(password),
       isVerified: true,
@@ -153,7 +155,8 @@ export function createAuthService(deps) {
     }
 
     const user = toUserDto(userRecord);
-    const token = jwt.sign({ sub: user.id, email: user.email, name: user.name, role: "candidate" }, jwtSecret, {
+    // Use the actual role from the database, or default to "student"
+    const token = jwt.sign({ sub: user.id, email: user.email, name: user.name, role: userRecord.role || "student" }, jwtSecret, {
       expiresIn: "8h",
     });
     return { token, user };
@@ -331,13 +334,13 @@ export function createAuthService(deps) {
         attendanceUpdatedAt: attendance?.updatedAt || null,
         insights: insights
           ? {
-              currentlyDetected: Boolean(insights.currentlyDetected),
-              outSince: insights.outSince || null,
-              lastSeenAt: insights.lastSeenAt || null,
-              presentMinutes: Number(insights.presentMinutes || 0),
-              awayMinutes: Number(insights.awayMinutes || 0),
-              totalTrainingMinutes: Number(insights.totalTrainingMinutes || 0),
-            }
+            currentlyDetected: Boolean(insights.currentlyDetected),
+            outSince: insights.outSince || null,
+            lastSeenAt: insights.lastSeenAt || null,
+            presentMinutes: Number(insights.presentMinutes || 0),
+            awayMinutes: Number(insights.awayMinutes || 0),
+            totalTrainingMinutes: Number(insights.totalTrainingMinutes || 0),
+          }
           : null,
       };
     });

@@ -41,7 +41,19 @@ Welcome to the **AI Mentor** backend documentation. This system provides a robus
 - [`GET /study-materials`](#get-study-materials) - Retrieve all study materials
 - [`GET /study-materials/:id/download`](#study-download) - Download material PDF
 
-### 5. WebSocket (Real-time)
+### 5. Assignments & Assessments
+- [`POST /api/assignments`](#assignments-create) - Create a new assignment (Teacher)
+- [`GET /api/assignments`](#assignments-list) - List assignments
+- [`GET /api/assignments/:id`](#assignments-get) - Get assignment details
+- [`POST /api/assignments/:id/submissions`](#assignments-submit) - Submit an assignment (Student)
+- [`PATCH /api/assignments/:id/submissions/:submissionId/visibility`](#assignments-finalize) - Finalize a submission (Student)
+- [`GET /api/assignments/:id/submissions`](#assignments-submissions) - View all submissions (Teacher)
+
+### 6. Tasks & Practice
+- [`PATCH /tasks/:id/status`](#tasks-status) - Update task progress status
+- [`GET /topics/:id/practice-questions`](#tasks-practice) - Get practice questions for a topic
+
+### 7. WebSocket (Real-time)
 - [`WS://localhost:4000`](#websocket-interface) - Real-time AI chat & Voice preparation
 
 ---
@@ -566,7 +578,79 @@ Initializes a LiveKit room and dispatches an AI agent.
 
 ---
 
-## 5. WebSocket Interface
+## 5. Assignments & Assessments
+
+### <a id="assignments-create"></a> Create Assignment
+**URL:** `/api/assignments`  
+**Method:** `POST`  
+**Auth:** Teacher Token
+
+**Request Body:**
+```json
+{
+  "title": "Week 1 Assessment",
+  "description": "Complete numericals.",
+  "studyPlanId": "69e78cf055dddcac300daa4b",
+  "weekNumber": 1,
+  "dueDate": "2026-05-05T00:00:00Z"
+}
+```
+
+---
+
+### <a id="assignments-submit"></a> Submit Assignment
+**URL:** `/api/assignments/:id/submissions`  
+**Method:** `POST`  
+**Auth:** Student Token
+
+**Request Body:**
+```json
+{
+  "content": "My answer is 2.5 mol/kg"
+}
+```
+
+---
+
+### <a id="assignments-finalize"></a> Finalize Submission
+**URL:** `/api/assignments/:id/submissions/:submissionId/visibility`  
+**Method:** `PATCH`  
+**Auth:** Student Token
+
+Locks the submission and makes it visible to the teacher.
+
+---
+
+### <a id="assignments-submissions"></a> View Submissions
+**URL:** `/api/assignments/:id/submissions`  
+**Method:** `GET`  
+**Auth:** Teacher Token
+
+Returns all student submissions for a specific assignment, automatically including student names and emails.
+
+---
+
+## 6. Tasks & Practice
+
+### <a id="tasks-status"></a> Update Task Status
+**URL:** `/tasks/:id/status`  
+**Method:** `PATCH`  
+**Auth:** Bearer Token
+
+Updates the student's progress on a specific task/topic (e.g., "in_progress", "completed").
+
+---
+
+### <a id="tasks-practice"></a> Get Practice Questions
+**URL:** `/topics/:id/practice-questions`  
+**Method:** `GET`  
+**Auth:** Bearer Token
+
+Fetches dynamically generated practice questions for a specific topic, useful for targeting weak areas.
+
+---
+
+## 7. WebSocket Interface
 
 **URL:** `ws://localhost:4000`  
 **Handshake:** `{ auth: { token: "JWT" } }`
