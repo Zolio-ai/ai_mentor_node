@@ -33,6 +33,47 @@ const beyCooldownMaxMs = Math.max(
   beyCooldownBaseMs,
   Number(process.env.BEY_START_COOLDOWN_MAX_MS || 45000),
 );
+
+/** Per-room guard: one in-flight Bey avatar start and optional cooldown after failures. */
+function tryAcquireBeyStart(roomName) {
+  const key = roomName || "__no_room__";
+  const now = Date.now();
+  let state = beyStartStateByRoom.get(key);
+  if (!state) {
+    state = { inFlight: false, cooldownUntil: 0, failStreak: 0 };
+    beyStartStateByRoom.set(key, state);
+  }
+  if (state.inFlight) {
+    return { allowed: false, reason: "in_flight", key };
+  }
+  if (now < state.cooldownUntil) {
+    return {
+      allowed: false,
+      reason: "cooldown",
+      waitMs: state.cooldownUntil - now,
+      key,
+    };
+  }
+  state.inFlight = true;
+  return { allowed: true, key };
+}
+
+function releaseBeyStart(key, avatarStartError) {
+  const state = beyStartStateByRoom.get(key);
+  if (!state) return;
+  state.inFlight = false;
+  const now = Date.now();
+  if (avatarStartError) {
+    state.failStreak = (state.failStreak || 0) + 1;
+    const exp = Math.min(state.failStreak, 8);
+    const backoff = Math.min(beyCooldownMaxMs, beyCooldownBaseMs * 2 ** (exp - 1));
+    state.cooldownUntil = now + Math.max(beyCooldownBaseMs, backoff);
+  } else {
+    state.failStreak = 0;
+    state.cooldownUntil = 0;
+  }
+}
+
 const forceDeepgram =
   String(process.env.USE_DEEPGRAM || "")
     .toLowerCase()
@@ -107,6 +148,20 @@ import {
   storeConversationMessageInternally
 } from "./workerService.mjs";
 
+const textEncoder = new TextEncoder();
+
+/** Push JSON to the room data channel so clients can subscribe by topic. */
+function publishJson(room, topic, payload) {
+  const lp = room?.localParticipant;
+  if (typeof lp?.publishData !== "function") {
+    console.warn("[worker] publishJson skipped: localParticipant.publishData unavailable", { topic });
+    return;
+  }
+  const data = textEncoder.encode(JSON.stringify(payload));
+  void lp.publishData(data, { reliable: true, topic }).catch((err) => {
+    console.error("[worker] publishData failed", topic, err?.message || err);
+  });
+}
 
 function forwardAssistantChatToRoom(session, room, aiSpeechIdRef, trainingStateRef, userId) {
   const { SpeechCreated } = voice.AgentSessionEventTypes;
@@ -221,7 +276,9 @@ export default defineAgent({
           enabled: true,
           // Avoid startup/session-noise interruptions immediately killing playout.
           minDuration: 1200,
-          minWords: 2,
+          // LiveKit skips the whole user turn (no reply) while agent audio is playing if
+          // word count < minWords. Values ≥2 drop short utterances like "hi" / "yes".
+          minWords: 0,
         },
       },
     });

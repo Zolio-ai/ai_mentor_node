@@ -1,0 +1,34 @@
+diff --git a/node_modules/@livekit/agents/dist/voice/generation.cjs b/node_modules/@livekit/agents/dist/voice/generation.cjs
+index 8d6567a..603faf8 100644
+--- a/node_modules/@livekit/agents/dist/voice/generation.cjs
++++ b/node_modules/@livekit/agents/dist/voice/generation.cjs
+@@ -46,7 +46,11 @@ var import_utils = require("../utils.cjs");
+ var import_agent = require("./agent.cjs");
+ var import_io = require("./io.cjs");
+ var import_run_context = require("./run_context.cjs");
+-const TTS_READ_IDLE_TIMEOUT_MS = 1e4;
++const TTS_READ_IDLE_TIMEOUT_MS = (() => {
++  const v = Number(process.env.LIVEKIT_TTS_READ_IDLE_TIMEOUT_MS);
++  if (Number.isFinite(v) && v >= 1e3) return v;
++  return 45e3;
++})();
+ class _LLMGenerationData {
+   constructor(textStream, toolCallStream) {
+     this.textStream = textStream;
+diff --git a/node_modules/@livekit/agents/dist/voice/generation.js b/node_modules/@livekit/agents/dist/voice/generation.js
+index b4fee60..acf6e8f 100644
+--- a/node_modules/@livekit/agents/dist/voice/generation.js
++++ b/node_modules/@livekit/agents/dist/voice/generation.js
+@@ -35,7 +35,11 @@ import {
+   isTimedString
+ } from "./io.js";
+ import { RunContext } from "./run_context.js";
+-const TTS_READ_IDLE_TIMEOUT_MS = 1e4;
++const TTS_READ_IDLE_TIMEOUT_MS = (() => {
++  const v = Number(process.env.LIVEKIT_TTS_READ_IDLE_TIMEOUT_MS);
++  if (Number.isFinite(v) && v >= 1e3) return v;
++  return 45e3;
++})();
+ class _LLMGenerationData {
+   constructor(textStream, toolCallStream) {
+     this.textStream = textStream;

@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "node --watch server.mjs",
     "start": "node server.mjs",
+    "postinstall": "patch-package",
     "worker:dev": "node worker/main.mjs dev",
     "worker:start": "node worker/main.mjs start"
   },
@@ -27,5 +28,8 @@
     "openai": "^6.34.0",
     "pdf-parse": "^2.4.5",
     "socket.io": "^4.8.3"
+  },
+  "devDependencies": {
+    "patch-package": "^8.0.1"
   }
 }

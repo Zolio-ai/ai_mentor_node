@@ -9,6 +9,17 @@ const internalApiKey = process.env.INTERNAL_API_KEY || process.env.JWT_SECRET ||
 const mongoUri = process.env.MONGODB_URI || "";
 const mongoDbName = process.env.MONGODB_DB_NAME || "ai_mentor_app";
 
+function warnIfApiConnectionRefused(err, operation) {
+  const cause = err?.cause;
+  const code =
+    (cause && typeof cause === "object" && cause.code) ||
+    (Array.isArray(cause?.errors) && cause.errors[0]?.code);
+  if (code !== "ECONNREFUSED") return;
+  console.error(
+    `[worker] ${operation}: connection refused to ${apiBaseUrl}. Start the app HTTP server on that port, or set API_BASE_URL to a URL this process can reach (on another machine or in Docker, localhost usually points only at this container/host, not your API).`,
+  );
+}
+
 let workerDbConnectPromise = null;
 const recentStoredMessages = new Set();
 
@@ -53,6 +64,7 @@ export async function fetchCandidateProfileInternally(userId) {
     return payload?.profile || null;
   } catch (err) {
     console.error(`[DEBUG] fetchCandidateProfileInternally error:`, err);
+    warnIfApiConnectionRefused(err, "fetchCandidateProfileInternally");
     return null;
   }
 }
@@ -76,6 +88,7 @@ export async function fetchStudyContextInternally(userId) {
     return payload?.studyContext || null;
   } catch (err) {
     console.error(`[DEBUG] fetchStudyContextInternally error:`, err);
+    warnIfApiConnectionRefused(err, "fetchStudyContextInternally");
     return null;
   }
 }
