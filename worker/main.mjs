@@ -16,6 +16,7 @@ const livekitLlmModel = process.env.LIVEKIT_LLM_MODEL || "openai/gpt-4o-mini";
 const syncAiTranscription = process.env.LIVEKIT_SYNC_TRANSCRIPTION !== "false";
 const apiBaseUrl = process.env.API_BASE_URL || "http://localhost:4000";
 const internalApiKey = process.env.INTERNAL_API_KEY || process.env.JWT_SECRET || "";
+console.log("[DEBUG] Initialized environment in worker:", { apiBaseUrl, internalApiKey });
 const endpointingDelayMs = Math.max(300, Number(process.env.VOICE_AGENT_ENDPOINTING_DELAY_MS || 1200));
 const userAwayTimeoutSec = Math.max(20, Number(process.env.VOICE_AGENT_USER_AWAY_TIMEOUT_SECONDS || 45));
 // Cost-safe default: always close user input/session when user disconnects.
@@ -105,33 +106,49 @@ function rankSubjects(marks) {
 }
 
 async function fetchCandidateProfileInternally(userId) {
-  if (!userId || !internalApiKey) return null;
+  if (!userId || !internalApiKey) {
+    console.error(`[DEBUG] fetchCandidateProfileInternally missing userId or internalApiKey. userId: ${userId}, internalApiKey: ${internalApiKey}`);
+    return null;
+  }
   try {
     const response = await fetch(`${apiBaseUrl}/internal/candidates/${userId}/profile`, {
       headers: {
         "x-internal-key": internalApiKey,
       },
     });
-    if (!response.ok) return null;
+    if (!response.ok) {
+      console.error(`[DEBUG] fetchCandidateProfileInternally non-ok status: ${response.status} ${response.statusText}`);
+      return null;
+    }
     const payload = await response.json().catch(() => ({}));
+    console.log(`[DEBUG] fetchCandidateProfileInternally success payload:`, JSON.stringify(payload));
     return payload?.profile || null;
-  } catch {
+  } catch (err) {
+    console.error(`[DEBUG] fetchCandidateProfileInternally error:`, err);
     return null;
   }
 }
 
 async function fetchStudyContextInternally(userId) {
-  if (!userId || !internalApiKey) return null;
+  if (!userId || !internalApiKey) {
+    console.error(`[DEBUG] fetchStudyContextInternally missing userId or internalApiKey. userId: ${userId}, internalApiKey: ${internalApiKey}`);
+    return null;
+  }
   try {
     const response = await fetch(`${apiBaseUrl}/internal/candidates/${userId}/study-context`, {
       headers: {
         "x-internal-key": internalApiKey,
       },
     });
-    if (!response.ok) return null;
+    if (!response.ok) {
+      console.error(`[DEBUG] fetchStudyContextInternally non-ok status: ${response.status} ${response.statusText}`);
+      return null;
+    }
     const payload = await response.json().catch(() => ({}));
+    console.log(`[DEBUG] fetchStudyContextInternally success payload:`, JSON.stringify(payload));
     return payload?.studyContext || null;
-  } catch {
+  } catch (err) {
+    console.error(`[DEBUG] fetchStudyContextInternally error:`, err);
     return null;
   }
 }
@@ -490,15 +507,7 @@ export default defineAgent({
     let userTurnSeq = 0;
     const trainingStateRef = { completionReached: false };
 
-    const userId = extractUserIdFromRoomName(ctx.room?.name || "");
-    const historyMessages = await fetchConversationHistoryInternally(userId);
     const chatCtx = new llm.ChatContext();
-    for (const msg of historyMessages) {
-      chatCtx.addMessage({
-        role: msg.role === "assistant" ? "assistant" : "user",
-        text: msg.text,
-      });
-    }
 
     const session = new voice.AgentSession({
       chatCtx,
@@ -527,6 +536,7 @@ export default defineAgent({
     });
 
     session.on(voice.AgentSessionEventTypes.UserInputTranscribed, (event) => {
+      console.log("[DEBUG] UserInputTranscribed event received:", JSON.stringify(event));
       const transcript = (event?.transcript || "").trim();
       if (!transcript) return;
 
@@ -538,35 +548,31 @@ export default defineAgent({
         timestamp: Date.now(),
       });
 
-      if (event?.isFinal) {
-        if (userId) {
-          void storeConversationMessageInternally({
-            userId,
-            roomName: ctx.room?.name || "",
-            role: "user",
-            text: transcript,
-            speechId: `user-turn-${userTurnSeq}`,
-            interrupted: false,
-          });
-        }
-        if (trainingStateRef.completionReached) {
-          void (async () => {
-            const shouldEnd = await detectEndIntentInternally(transcript);
-            if (!shouldEnd) return;
-            publishJson(ctx.room, "mentor.training.status", {
-              type: "training_end_requested",
-              text: transcript,
-              timestamp: Date.now(),
-            });
-          })();
-        }
-        userTurnSeq += 1;
-        lastInterimTranscript = "";
-        lastInterimAtMs = 0;
-        return;
+      if (userId) {
+        void storeConversationMessageInternally({
+          userId,
+          roomName: ctx.room?.name || "",
+          role: "user",
+          text: transcript,
+          speechId: `user-turn-${userTurnSeq}`,
+          interrupted: false,
+        });
       }
-      lastInterimTranscript = transcript;
-      lastInterimAtMs = Date.now();
+      if (trainingStateRef.completionReached) {
+        void (async () => {
+          const shouldEnd = await detectEndIntentInternally(transcript);
+          if (!shouldEnd) return;
+          publishJson(ctx.room, "mentor.training.status", {
+            type: "training_end_requested",
+            text: transcript,
+            timestamp: Date.now(),
+          });
+        })();
+      }
+      userTurnSeq += 1;
+      lastInterimTranscript = "";
+      lastInterimAtMs = 0;
+      return;
     });
 
     session.on(voice.AgentSessionEventTypes.UserStateChanged, (event) => {
@@ -600,9 +606,25 @@ export default defineAgent({
 
     await ctx.connect();
 
+    const userId = extractUserIdFromRoomName(ctx.room?.name || "");
     const candidateProfile = await fetchCandidateProfileInternally(userId);
     const studyContext = await fetchStudyContextInternally(userId);
+    console.log(`[DEBUG] Worker fetch after connect - candidateProfile:`, JSON.stringify(candidateProfile));
+    console.log(`[DEBUG] Worker fetch after connect - studyContext:`, JSON.stringify(studyContext));
     const adaptiveInstructions = buildAdaptiveMentorInstructions(candidateProfile, studyContext);
+
+    chatCtx.addMessage({
+      role: "system",
+      text: adaptiveInstructions,
+    });
+
+    const historyMessages = await fetchConversationHistoryInternally(userId);
+    for (const msg of historyMessages) {
+      chatCtx.addMessage({
+        role: msg.role === "assistant" ? "assistant" : "user",
+        text: msg.text,
+      });
+    }
 
     const aiSpeechIdRef = { current: null };
     forwardAssistantChatToRoom(session, ctx.room, aiSpeechIdRef, trainingStateRef, userId);
@@ -683,15 +705,33 @@ export default defineAgent({
       await new Promise((resolve) => setTimeout(resolve, 1200));
       const chapterTitle = String(studyContext?.currentChapter?.title || "").trim();
       const topicTitle = String(studyContext?.currentTopic?.title || "").trim();
-      const studyFocusPrompt =
-        chapterTitle || topicTitle
-          ? `Their current study plan focus is chapter "${chapterTitle || "current chapter"}" and topic "${topicTitle || "current topic"}". Ask if they have any doubts specifically in this chapter/topic and start from there.`
-          : "Ask what topic from their current study plan they want to clear doubts in first.";
-      session.generateReply({
-        instructions: isResumeSession
-          ? `Welcome them back warmly and clearly say you are resuming from where they left off in the previous session. Briefly summarize likely focus areas from prior mentoring context (weakest two subjects). ${studyFocusPrompt} Keep it concise, calm, and supportive.`
-          : `Welcome them warmly to the AI Mentor session with a personalized opening that references their current academic level and two weakest subjects. Mention that they can ask unlimited doubts. ${studyFocusPrompt} Speak clearly and a bit slower than normal, with a calm tone.`,
+      
+      const studyFocusPrompt = chapterTitle || topicTitle
+        ? `I see you are working on the topic "${topicTitle}" in chapter "${chapterTitle}". Are you ready to clear doubts in this topic or would you like me to share a specific example?`
+        : "What topic from your current study plan would you like to clear doubts in first?";
+
+      const welcomeGreeting = isResumeSession
+        ? `Welcome back to your mentoring session! It is great to see you again. ${studyFocusPrompt}`
+        : `Welcome warmly to your AI Mentor session. Remember that you can ask unlimited doubts about any topic. ${studyFocusPrompt}`;
+
+      chatCtx.addMessage({
+        role: "assistant",
+        text: welcomeGreeting,
       });
+
+      const aiSpeechId = typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : "speech-" + Date.now();
+      aiSpeechIdRef.current = aiSpeechId;
+
+      publishJson(ctx.room, "mentor.ai.transcript", {
+        type: "assistant_transcript",
+        id: aiSpeechId,
+        text: welcomeGreeting,
+        partial: false,
+        timestamp: Date.now(),
+        isLastQuestion: false,
+      });
+
+      await session.say(welcomeGreeting);
     } catch (error) {
       console.warn("[AGENT] Skipped initial greeting because session is no longer running:", error?.message || error);
     }

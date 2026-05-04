@@ -294,16 +294,14 @@ export const saveChapterAssessment = async (userId, chapterIndex, userAnswers) =
 
 export const fetchAssessmentStatuses = async (userId) => {
   const results = await AssessmentResult.find({ userId }).lean();
-  const statuses = {};
-  for (const r of results) {
-    statuses[r.chapterIndex] = {
-      score: r.score || 0,
-      totalQuestions: r.totalQuestions || 10,
-      attempts: r.attempts || 1,
-      completedAt: r.updatedAt || r.createdAt
-    };
-  }
-  return statuses;
+  return results.map((r) => ({
+    chapterIndex: r.chapterIndex,
+    score: r.score || 0,
+    totalQuestions: r.totalQuestions || 10,
+    attempts: r.attempts || 1,
+    updatedAt: r.updatedAt,
+    createdAt: r.createdAt,
+  }));
 };
 
 export const getChapterAssessmentMistakes = async (userId, chapterIndex) => {
