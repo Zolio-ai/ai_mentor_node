@@ -14,7 +14,7 @@ dotenv.config();
 const agentName = process.env.LIVEKIT_AGENT_NAME || "ai-mentor-bey-agent";
 const livekitLlmModel = process.env.LIVEKIT_LLM_MODEL || "openai/gpt-4o-mini";
 const syncAiTranscription = process.env.LIVEKIT_SYNC_TRANSCRIPTION !== "false";
-const apiBaseUrl = process.env.API_BASE_URL || "http://localhost:4000";
+const apiBaseUrl = process.env.API_BASE_URL || "http://localhost:4004";
 const internalApiKey = process.env.INTERNAL_API_KEY || process.env.JWT_SECRET || "";
 console.log("[DEBUG] Initialized environment in worker:", { apiBaseUrl, internalApiKey });
 const endpointingDelayMs = Math.max(300, Number(process.env.VOICE_AGENT_ENDPOINTING_DELAY_MS || 1200));
@@ -317,35 +317,77 @@ export default defineAgent({
       });
     }
 
-    const originalPush = chatCtx.messages.push.bind(chatCtx.messages);
-    chatCtx.messages.push = function (...items) {
-      const res = originalPush(...items);
-      for (const value of items) {
-        if (value && value.text && value.role && value.role !== "system") {
-          console.log(`[DEBUG] messages.push intercepted:`, value.role, value.text);
+    const hookArray = (arr) => {
+      if (!arr || typeof arr.push !== "function") return;
+      const originalPush = arr.push.bind(arr);
+      arr.push = function (...items) {
+        const res = originalPush(...items);
+        for (const msg of items) {
+          if (!msg || msg.role === "system") continue;
+          let text = "";
+          if (typeof msg.textContent === "string") {
+            text = msg.textContent;
+          } else if (typeof msg.text === "string") {
+            text = msg.text;
+          } else if (typeof msg.content === "string") {
+            text = msg.content;
+          } else if (Array.isArray(msg.content)) {
+            for (const part of msg.content) {
+              if (part && typeof part.text === "string") {
+                text = part.text;
+                break;
+              }
+            }
+          }
+          text = String(text || "").trim();
+          if (!text) continue;
+
+          console.log(`[DEBUG] Array intercepted:`, msg.role, text);
           void storeConversationMessageInternally({
             userId,
             roomName: ctx.room?.name || "",
-            role: value.role === "assistant" ? "assistant" : "user",
-            text: value.text,
-            speechId: value.id || "push-" + Date.now(),
+            role: msg.role === "assistant" ? "assistant" : "user",
+            text,
+            speechId: msg.id || "push-" + Date.now(),
             interrupted: false,
           });
         }
-      }
-      return res;
+        return res;
+      };
     };
+
+    if (chatCtx._items) hookArray(chatCtx._items);
+    if (chatCtx.items) hookArray(chatCtx.items);
+    if (chatCtx.messages) hookArray(chatCtx.messages);
 
     const originalAddMessage = chatCtx.addMessage.bind(chatCtx);
     chatCtx.addMessage = function (msg) {
       originalAddMessage(msg);
-      if (msg && msg.text && msg.role && msg.role !== "system") {
-        console.log(`[DEBUG] chatCtx.addMessage intercepted:`, msg.role, msg.text);
+      if (msg && msg.role !== "system") {
+        let text = "";
+        if (typeof msg.textContent === "string") {
+          text = msg.textContent;
+        } else if (typeof msg.text === "string") {
+          text = msg.text;
+        } else if (typeof msg.content === "string") {
+          text = msg.content;
+        } else if (Array.isArray(msg.content)) {
+          for (const part of msg.content) {
+            if (part && typeof part.text === "string") {
+              text = part.text;
+              break;
+            }
+          }
+        }
+        text = String(text || "").trim();
+        if (!text) return;
+
+        console.log(`[DEBUG] addMessage intercepted:`, msg.role, text);
         void storeConversationMessageInternally({
           userId,
           roomName: ctx.room?.name || "",
           role: msg.role === "assistant" ? "assistant" : "user",
-          text: msg.text,
+          text,
           speechId: msg.id || "ctx-" + Date.now(),
           interrupted: false,
         });

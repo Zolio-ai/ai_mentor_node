@@ -4,7 +4,7 @@ import { ConversationMessage } from "../src/models/index.mjs";
 
 dotenv.config();
 
-const apiBaseUrl = process.env.API_BASE_URL || "http://localhost:4000";
+const apiBaseUrl = process.env.API_BASE_URL || "http://localhost:4004";
 const internalApiKey = process.env.INTERNAL_API_KEY || process.env.JWT_SECRET || "";
 const mongoUri = process.env.MONGODB_URI || "";
 const mongoDbName = process.env.MONGODB_DB_NAME || "ai_mentor_app";
