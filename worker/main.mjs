@@ -93,329 +93,20 @@ function resolveTts() {
   }
 }
 
-function rankSubjects(marks) {
-  const pairs = Object.entries(marks || {})
-    .map(([subject, value]) => [subject, Number(value)])
-    .filter(([, value]) => Number.isFinite(value));
-  const sorted = [...pairs].sort((a, b) => b[1] - a[1]);
-  return {
-    strongest: sorted.slice(0, 2),
-    weakest: [...sorted].sort((a, b) => a[1] - b[1]).slice(0, 2),
-    all: sorted,
-  };
-}
+import {
+  rankSubjects,
+  fetchCandidateProfileInternally,
+  fetchStudyContextInternally,
+  buildAdaptiveMentorInstructions,
+  extractUserIdFromRoomName,
+  markTrainingCompletionInternally,
+  detectEndIntentInternally,
+  completeTopicInternally,
+  hasConversationHistory,
+  fetchConversationHistoryInternally,
+  storeConversationMessageInternally
+} from "./workerService.mjs";
 
-async function fetchCandidateProfileInternally(userId) {
-  if (!userId || !internalApiKey) {
-    console.error(`[DEBUG] fetchCandidateProfileInternally missing userId or internalApiKey. userId: ${userId}, internalApiKey: ${internalApiKey}`);
-    return null;
-  }
-  try {
-    const response = await fetch(`${apiBaseUrl}/internal/candidates/${userId}/profile`, {
-      headers: {
-        "x-internal-key": internalApiKey,
-      },
-    });
-    if (!response.ok) {
-      console.error(`[DEBUG] fetchCandidateProfileInternally non-ok status: ${response.status} ${response.statusText}`);
-      return null;
-    }
-    const payload = await response.json().catch(() => ({}));
-    console.log(`[DEBUG] fetchCandidateProfileInternally success payload:`, JSON.stringify(payload));
-    return payload?.profile || null;
-  } catch (err) {
-    console.error(`[DEBUG] fetchCandidateProfileInternally error:`, err);
-    return null;
-  }
-}
-
-async function fetchStudyContextInternally(userId) {
-  if (!userId || !internalApiKey) {
-    console.error(`[DEBUG] fetchStudyContextInternally missing userId or internalApiKey. userId: ${userId}, internalApiKey: ${internalApiKey}`);
-    return null;
-  }
-  try {
-    const response = await fetch(`${apiBaseUrl}/internal/candidates/${userId}/study-context`, {
-      headers: {
-        "x-internal-key": internalApiKey,
-      },
-    });
-    if (!response.ok) {
-      console.error(`[DEBUG] fetchStudyContextInternally non-ok status: ${response.status} ${response.statusText}`);
-      return null;
-    }
-    const payload = await response.json().catch(() => ({}));
-    console.log(`[DEBUG] fetchStudyContextInternally success payload:`, JSON.stringify(payload));
-    return payload?.studyContext || null;
-  } catch (err) {
-    console.error(`[DEBUG] fetchStudyContextInternally error:`, err);
-    return null;
-  }
-}
-
-function buildAdaptiveMentorInstructions(profile, studyContext = null) {
-  if (!profile) {
-    return "Candidate profile is unavailable. Ask 3 quick diagnostic questions (target role/exam, strongest topic, weakest topic), then adapt mentoring plan from their answers.";
-  }
-
-  const marks = {
-    physics: profile?.marks?.physics,
-    chemistry: profile?.marks?.chemistry,
-    maths: profile?.marks?.maths,
-    biology: profile?.marks?.biology,
-  };
-  const ranked = rankSubjects(marks);
-  const strongest = ranked.strongest.map(([subject, score]) => `${subject} (${score})`).join(", ") || "N/A";
-  const weakest = ranked.weakest.map(([subject, score]) => `${subject} (${score})`).join(", ") || "N/A";
-  const avg =
-    ranked.all.length > 0
-      ? Number((ranked.all.reduce((sum, [, score]) => sum + score, 0) / ranked.all.length).toFixed(1))
-      : null;
-
-  let levelBand = "beginner";
-  if (avg != null && avg >= 85) levelBand = "advanced";
-  else if (avg != null && avg >= 70) levelBand = "intermediate";
-
-  const studyContextLines = [];
-  if (studyContext?.currentChapter?.title || studyContext?.currentTopic?.title) {
-    const chapterTitle = String(studyContext?.currentChapter?.title || "Current chapter").trim();
-    const topicTitle = String(studyContext?.currentTopic?.title || "Current topic").trim();
-    const subject = String(studyContext?.subject || "Current subject").trim();
-    studyContextLines.push(
-      `Current study-plan subject: ${subject}`,
-      `Current study-plan chapter: ${chapterTitle}`,
-      `Current study-plan topic: ${topicTitle}`,
-      "Topic-priority mentoring rules:",
-      "- Prioritize doubts from the current study-plan topic before switching to other topics.",
-      "- If learner asks unrelated question, answer briefly and then bring them back to current topic doubts.",
-      "- At the end of each response, ask one short doubt-check specifically about current chapter/topic.",
-      '- Use natural prompts like: "Any doubts in this topic?" or "Any confusion in this chapter point?".',
-    );
-  }
-
-  return [
-    `Candidate name: ${profile.firstName || profile.name || "Candidate"}`,
-    `Class: ${profile.class ?? "N/A"}, Stream: ${profile.stream || "N/A"}, Entrance Exam: ${profile.entranceExam || "N/A"}`,
-    `Subject marks: Physics=${marks.physics ?? "N/A"}, Chemistry=${marks.chemistry ?? "N/A"}, Maths=${marks.maths ?? "N/A"}, Biology=${marks.biology ?? "N/A"}, CGPA10=${profile.cgpa10 ?? "N/A"}`,
-    `Strongest subjects: ${strongest}`,
-    `Weakest subjects: ${weakest}`,
-    `Estimated level: ${levelBand}`,
-    "Mentoring behavior rules:",
-    "- Personalize examples using strong subjects first, then bridge into weak subjects.",
-    "- Spend more time on weakest two subjects with simpler step-by-step explanations.",
-    "- Ask short check questions to validate understanding before moving on.",
-    "- Give a practical micro-study plan (today, this week) tailored to weakest subjects.",
-    "- Keep guidance concise, actionable, and confidence-building.",
-    ...studyContextLines,
-  ].join("\n");
-}
-
-function publishJson(room, topic, data) {
-  try {
-    const payload = new TextEncoder().encode(JSON.stringify(data));
-    void room.localParticipant
-      ?.publishData?.(payload, { reliable: true, topic })
-      .catch((error) => console.error("publishData failed", topic, error.message));
-  } catch (error) {
-    console.error("publishJson failed", error);
-  }
-}
-
-function sanitizeAssistantText(rawText) {
-  const text = String(rawText || "");
-  if (!text) return "";
-  return text
-    .replace(/\*\*(.*?)\*\*/g, "$1")
-    .replace(/__(.*?)__/g, "$1")
-    .replace(/^[\s>*#-]+/gm, "")
-    .replace(/`+/g, "")
-    .replace(/\s{2,}/g, " ")
-    .trim();
-}
-
-function isBeyConcurrencyError(error) {
-  const statusCode = Number(error?.statusCode || 0);
-  const body = String(error?.body?.error || error?.body || "");
-  return statusCode === 429 || body.toLowerCase().includes("concurrency limit");
-}
-
-function isBeyTimeoutError(error) {
-  const name = String(error?.name || "").toLowerCase();
-  const message = String(error?.message || "").toLowerCase();
-  return name.includes("timeout") || message.includes("timeout");
-}
-
-function getBeyRoomStartState(roomName) {
-  const key = String(roomName || "").trim() || "__default__";
-  let state = beyStartStateByRoom.get(key);
-  if (!state) {
-    state = { inFlight: false, cooldownUntil: 0, failureCount: 0 };
-    beyStartStateByRoom.set(key, state);
-  }
-  return { key, state };
-}
-
-function tryAcquireBeyStart(roomName) {
-  const now = Date.now();
-  const { key, state } = getBeyRoomStartState(roomName);
-  if (state.inFlight) {
-    return { allowed: false, reason: "in_flight", waitMs: 0 };
-  }
-  if (state.cooldownUntil > now) {
-    return {
-      allowed: false,
-      reason: "cooldown",
-      waitMs: Math.max(0, state.cooldownUntil - now),
-    };
-  }
-  state.inFlight = true;
-  beyStartStateByRoom.set(key, state);
-  return { allowed: true, key };
-}
-
-function releaseBeyStart(roomKey, error = null) {
-  const now = Date.now();
-  const state = beyStartStateByRoom.get(roomKey);
-  if (!state) return;
-  state.inFlight = false;
-  if (!error) {
-    state.failureCount = 0;
-    state.cooldownUntil = 0;
-    beyStartStateByRoom.set(roomKey, state);
-    return;
-  }
-
-  state.failureCount += 1;
-  const isRetryableBeyFailure = isBeyConcurrencyError(error) || isBeyTimeoutError(error);
-  const step = isRetryableBeyFailure ? 1.8 : 1.4;
-  const cooldownMs = Math.min(
-    beyCooldownMaxMs,
-    Math.round(beyCooldownBaseMs * Math.pow(step, Math.max(0, state.failureCount - 1))),
-  );
-  state.cooldownUntil = now + cooldownMs;
-  beyStartStateByRoom.set(roomKey, state);
-}
-
-function extractUserIdFromRoomName(roomName) {
-  const match = String(roomName || "").match(/^mentor-(.+)$/);
-  return match?.[1] || "";
-}
-
-async function markTrainingCompletionInternally(roomName, isLastQuestion) {
-  const userId = extractUserIdFromRoomName(roomName);
-  if (!userId || !isLastQuestion || !internalApiKey) return;
-  try {
-    const response = await fetch(`${apiBaseUrl}/internal/training/completion`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-internal-key": internalApiKey,
-      },
-      body: JSON.stringify({ userId, isLastQuestion }),
-    });
-    if (!response.ok) {
-      const text = await response.text().catch(() => "");
-      console.warn("[completion] internal mark failed", response.status, text);
-    }
-  } catch (error) {
-    console.warn("[completion] internal mark error", error?.message || error);
-  }
-}
-
-async function detectEndIntentInternally(text) {
-  const transcript = String(text || "").trim();
-  if (!transcript || !internalApiKey) return false;
-  try {
-    const response = await fetch(`${apiBaseUrl}/internal/training/end-intent`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-internal-key": internalApiKey,
-      },
-      body: JSON.stringify({ text: transcript }),
-    });
-    if (!response.ok) return false;
-    const payload = await response.json().catch(() => ({}));
-    return Boolean(payload?.endIntent);
-  } catch {
-    return false;
-  }
-}
-
-async function completeTopicInternally(userId) {
-  const safeUserId = String(userId || "").trim();
-  if (!safeUserId || !internalApiKey) return;
-  try {
-    const response = await fetch(`${apiBaseUrl}/internal/training/complete-topic`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-internal-key": internalApiKey,
-      },
-      body: JSON.stringify({ userId: safeUserId }),
-    });
-    if (!response.ok) {
-      const text = await response.text().catch(() => "");
-      console.warn("[study-progress] auto complete-topic failed", response.status, text);
-    }
-  } catch (error) {
-    console.warn("[study-progress] auto complete-topic error", error?.message || error);
-  }
-}
-
-async function ensureWorkerDbConnected() {
-  if (mongoose.connection.readyState === 1) return;
-  if (workerDbConnectPromise) return workerDbConnectPromise;
-  if (!mongoUri) throw new Error("MONGODB_URI is missing.");
-  workerDbConnectPromise = mongoose.connect(mongoUri, { dbName: mongoDbName }).finally(() => {
-    workerDbConnectPromise = null;
-  });
-  return workerDbConnectPromise;
-}
-
-async function hasConversationHistory(userId) {
-  const safeUserId = String(userId || "").trim();
-  if (!safeUserId) return false;
-  try {
-    await ensureWorkerDbConnected();
-    const count = await ConversationMessage.countDocuments({ userId: safeUserId });
-    return count > 0;
-  } catch {
-    return false;
-  }
-}
-
-async function fetchConversationHistoryInternally(userId) {
-  const safeUserId = String(userId || "").trim();
-  if (!safeUserId) return [];
-  await ensureWorkerDbConnected();
-  const messages = await ConversationMessage.find({ userId: safeUserId })
-    .sort({ createdAt: -1 })
-    .limit(10)
-    .lean();
-  return messages.reverse();
-}
-
-async function storeConversationMessageInternally({ userId, roomName, role, text, speechId = "", interrupted = false }) {
-  const safeText = String(text || "").trim();
-  console.log(`[DEBUG] Attempting to store message for userId: ${userId}, text: ${safeText}`);
-  if (!userId || !safeText) return;
-  try {
-    await ensureWorkerDbConnected();
-    await ConversationMessage.create({
-      userId,
-      roomName: String(roomName || "").trim(),
-      role,
-      text: safeText,
-      speechId: String(speechId || "").trim(),
-      interrupted: Boolean(interrupted),
-      source: "voice-agent",
-    });
-    console.log(`[DEBUG] Successfully stored message to DB`);
-  } catch (error) {
-    console.error("Failed to store message", error);
-  }
-}
 
 function forwardAssistantChatToRoom(session, room, aiSpeechIdRef, trainingStateRef, userId) {
   const { SpeechCreated } = voice.AgentSessionEventTypes;
@@ -626,6 +317,41 @@ export default defineAgent({
       });
     }
 
+    const originalPush = chatCtx.messages.push.bind(chatCtx.messages);
+    chatCtx.messages.push = function (...items) {
+      const res = originalPush(...items);
+      for (const value of items) {
+        if (value && value.text && value.role && value.role !== "system") {
+          console.log(`[DEBUG] messages.push intercepted:`, value.role, value.text);
+          void storeConversationMessageInternally({
+            userId,
+            roomName: ctx.room?.name || "",
+            role: value.role === "assistant" ? "assistant" : "user",
+            text: value.text,
+            speechId: value.id || "push-" + Date.now(),
+            interrupted: false,
+          });
+        }
+      }
+      return res;
+    };
+
+    const originalAddMessage = chatCtx.addMessage.bind(chatCtx);
+    chatCtx.addMessage = function (msg) {
+      originalAddMessage(msg);
+      if (msg && msg.text && msg.role && msg.role !== "system") {
+        console.log(`[DEBUG] chatCtx.addMessage intercepted:`, msg.role, msg.text);
+        void storeConversationMessageInternally({
+          userId,
+          roomName: ctx.room?.name || "",
+          role: msg.role === "assistant" ? "assistant" : "user",
+          text: msg.text,
+          speechId: msg.id || "ctx-" + Date.now(),
+          interrupted: false,
+        });
+      }
+    };
+
     const aiSpeechIdRef = { current: null };
     forwardAssistantChatToRoom(session, ctx.room, aiSpeechIdRef, trainingStateRef, userId);
 
@@ -658,6 +384,63 @@ export default defineAgent({
       clearInterval(autoTopicTimer);
     };
     ctx.room?.on?.("disconnected", clearAutoTopicTimer);
+
+    const handleDataChannelChat = (payload, participant, kind, topic) => {
+      try {
+        const str = new TextDecoder().decode(payload);
+        console.log(`[DEBUG] Received data channel payload. Topic: ${topic}, Str: ${str}`);
+        let msgText = str;
+        try {
+          const parsed = JSON.parse(str);
+          msgText = parsed.message || parsed.text || str;
+        } catch (_) {}
+
+        if (msgText && typeof msgText === "string" && msgText.trim()) {
+          console.log(`[DEBUG] Storing typed text message from student via data channel:`, msgText);
+          void storeConversationMessageInternally({
+            userId,
+            roomName: ctx.room?.name || "",
+            role: "user",
+            text: msgText,
+            speechId: "chat-" + Date.now(),
+            interrupted: false,
+          });
+          chatCtx.addMessage({
+            role: "user",
+            text: msgText,
+          });
+        }
+      } catch (err) {
+        console.error("[DEBUG] Error parsing dataReceived in worker:", err);
+      }
+    };
+
+    const handleChatMessage = (message, participant) => {
+      try {
+        console.log(`[DEBUG] Received chat message event. Message:`, message);
+        const text = typeof message === "object" ? (message?.message || message?.text) : message;
+        if (text && typeof text === "string" && text.trim()) {
+          console.log(`[DEBUG] Storing typed text message from student via chat message:`, text);
+          void storeConversationMessageInternally({
+            userId,
+            roomName: ctx.room?.name || "",
+            role: "user",
+            text,
+            speechId: "chat-" + Date.now(),
+            interrupted: false,
+          });
+          chatCtx.addMessage({
+            role: "user",
+            text,
+          });
+        }
+      } catch (err) {
+        console.error("[DEBUG] Error parsing chatMessage in worker:", err);
+      }
+    };
+
+    ctx.room?.on?.("dataReceived", handleDataChannelChat);
+    ctx.room?.on?.("chatMessage", handleChatMessage);
 
     const avatar = new bey.AvatarSession({
       apiKey: process.env.BEY_API_KEY,
