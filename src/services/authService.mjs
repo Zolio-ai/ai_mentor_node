@@ -1,7 +1,7 @@
 import jwt from "jsonwebtoken";
 import { pbkdf2Sync, randomBytes, timingSafeEqual } from "node:crypto";
 import { buildAttendanceInsights } from "./attendanceInsights.mjs";
-import { initializeTaskFlowForNewUser } from "./taskService.mjs";
+import { getOrCreateTaskFlows } from "./taskService.mjs";
 
 function createHttpError(status, message, extra = {}) {
   const error = new Error(message);
@@ -133,7 +133,7 @@ export function createAuthService(deps) {
     });
 
     // Initialize personal TaskFlow for the new user based on all existing global tasks
-    await initializeTaskFlowForNewUser(userRecord._id).catch(err => {
+    await getOrCreateTaskFlows(userRecord._id).catch(err => {
       console.error("Error initializing TaskFlow for new user:", err);
     });
 

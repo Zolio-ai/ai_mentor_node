@@ -1,4 +1,4 @@
-import { ServerOptions, cli, defineAgent, inference, voice } from "@livekit/agents";
+import { ServerOptions, cli, defineAgent, inference, voice, llm } from "@livekit/agents";
 import * as bey from "@livekit/agents-plugin-bey";
 import * as deepgram from "@livekit/agents-plugin-deepgram";
 import dotenv from "dotenv";
@@ -368,8 +368,20 @@ async function hasConversationHistory(userId) {
   }
 }
 
+async function fetchConversationHistoryInternally(userId) {
+  const safeUserId = String(userId || "").trim();
+  if (!safeUserId) return [];
+  await ensureWorkerDbConnected();
+  const messages = await ConversationMessage.find({ userId: safeUserId })
+    .sort({ createdAt: -1 })
+    .limit(10)
+    .lean();
+  return messages.reverse();
+}
+
 async function storeConversationMessageInternally({ userId, roomName, role, text, speechId = "", interrupted = false }) {
   const safeText = String(text || "").trim();
+  console.log(`[DEBUG] Attempting to store message for userId: ${userId}, text: ${safeText}`);
   if (!userId || !safeText) return;
   try {
     await ensureWorkerDbConnected();
@@ -382,8 +394,9 @@ async function storeConversationMessageInternally({ userId, roomName, role, text
       interrupted: Boolean(interrupted),
       source: "voice-agent",
     });
+    console.log(`[DEBUG] Successfully stored message to DB`);
   } catch (error) {
-    console.warn("[conversation] persist error", error?.message || error);
+    console.error("Failed to store message", error);
   }
 }
 
@@ -477,7 +490,18 @@ export default defineAgent({
     let userTurnSeq = 0;
     const trainingStateRef = { completionReached: false };
 
+    const userId = extractUserIdFromRoomName(ctx.room?.name || "");
+    const historyMessages = await fetchConversationHistoryInternally(userId);
+    const chatCtx = new llm.ChatContext();
+    for (const msg of historyMessages) {
+      chatCtx.addMessage({
+        role: msg.role === "assistant" ? "assistant" : "user",
+        text: msg.text,
+      });
+    }
+
     const session = new voice.AgentSession({
+      chatCtx,
       stt: resolveStt(),
       llm: new inference.LLM({
         model: livekitLlmModel,
@@ -576,7 +600,6 @@ export default defineAgent({
 
     await ctx.connect();
 
-    const userId = extractUserIdFromRoomName(ctx.room?.name || "");
     const candidateProfile = await fetchCandidateProfileInternally(userId);
     const studyContext = await fetchStudyContextInternally(userId);
     const adaptiveInstructions = buildAdaptiveMentorInstructions(candidateProfile, studyContext);

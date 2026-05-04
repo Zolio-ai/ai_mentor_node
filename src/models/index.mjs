@@ -188,9 +188,10 @@ export const AssessmentResult = mongoose.model("AssessmentResult", assessmentRes
 
 const taskSchema = new mongoose.Schema(
   {
-    studyPlanId: { type: mongoose.Schema.Types.ObjectId, ref: "StudyPlan", required: true, index: true },
+    stream: { type: String, default: "General", trim: true },
     topic: { type: String, required: true, trim: true },
-    weekNumber: { type: Number, default: null },
+    chapterTitle: { type: String, default: "", trim: true },
+    order: { type: Number, default: 0 },
   },
   { timestamps: true },
 );
@@ -204,6 +205,10 @@ const taskFlowSchema = new mongoose.Schema(
       enum: ["not_started", "in_progress", "completed"],
       default: "not_started",
     },
+    startedAt: { type: Date, default: null },
+    completedAt: { type: Date, default: null },
+    durationSeconds: { type: Number, default: 0 },
+    expectedCompletionAt: { type: Date, default: null },
   },
   { timestamps: true },
 );

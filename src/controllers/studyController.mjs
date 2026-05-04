@@ -2,13 +2,16 @@ import {
   getAllStudyPlans,
   getAllStudyMaterials,
   getStudyMaterialById,
-  getOrCreateStudyProgress,
-  completeCurrentTopic,
+} from "../services/studyService.mjs";
+
+import {
+  getOrCreateTaskFlows,
+  completeCurrentTask,
   generateChapterAssessment,
   saveChapterAssessment,
+  fetchAssessmentStatuses,
   getChapterAssessmentMistakes,
-  getAssessmentStatuses as fetchAssessmentStatuses,
-} from "../services/studyService.mjs";
+} from "../services/taskService.mjs";
 
 /**
  * Controller for handling study-related requests.
@@ -16,8 +19,8 @@ import {
 export const createStudyController = ({ openai, openAiModel } = {}) => {
   const getStudyPlans = async (req, res) => {
     try {
-      const plans = await getAllStudyPlans();
-      res.status(200).json({ success: true, data: plans });
+      // Deprecated, returning empty or could fetch tasks
+      res.status(200).json({ success: true, data: [] });
     } catch (error) {
       console.error("Error fetching study plans:", error);
       res.status(500).json({ success: false, message: error.message });
@@ -56,10 +59,10 @@ export const createStudyController = ({ openai, openAiModel } = {}) => {
     try {
       const userId = req.user.sub || req.params?.userId;
       if (!userId) return res.status(400).json({ success: false, message: "userId is required" });
-      const progress = await getOrCreateStudyProgress(userId);
-      res.status(200).json({ success: true, data: progress });
+      const flows = await getOrCreateTaskFlows(userId);
+      res.status(200).json({ success: true, data: flows });
     } catch (error) {
-      console.error("Error fetching study progress:", error);
+      console.error("Error fetching task flows:", error);
       res.status(500).json({ success: false, message: error.message });
     }
   };
@@ -67,10 +70,10 @@ export const createStudyController = ({ openai, openAiModel } = {}) => {
   const completeTopic = async (req, res) => {
     try {
       const userId = req.user.sub;
-      const progress = await completeCurrentTopic(userId);
-      res.status(200).json({ success: true, data: progress });
+      const flows = await completeCurrentTask(userId);
+      res.status(200).json({ success: true, data: flows });
     } catch (error) {
-      console.error("Error completing topic:", error);
+      console.error("Error completing task:", error);
       res.status(500).json({ success: false, message: error.message });
     }
   };
@@ -78,31 +81,32 @@ export const createStudyController = ({ openai, openAiModel } = {}) => {
   const internalGetStudyContext = async (req, res) => {
     try {
       const { userId } = req.params;
-      const progress = await getOrCreateStudyProgress(userId);
-      if (!progress || !progress.studyPlanId) {
+      const flows = await getOrCreateTaskFlows(userId);
+      if (!flows || flows.length === 0) {
         return res.status(200).json({ ok: true, studyContext: null });
       }
 
-      const plan = progress.studyPlanId;
-      const weeks = Array.isArray(plan?.weeks) ? plan.weeks : [];
-      const chapter = weeks[progress.currentChapterIndex];
-      const topicTitle = Array.isArray(chapter?.topics) ? chapter.topics[progress.currentTopicIndex] : "";
-
+      const activeFlow = flows.find(f => f.status === "in_progress") || flows[0];
+      const task = activeFlow.taskId;
+      
+      const isCompleted = flows.every(f => f.status === "completed");
+      const completedCount = flows.filter(f => f.status === "completed").length;
+      
       res.status(200).json({
         ok: true,
         studyContext: {
-          planId: plan._id,
-          subject: plan.planName || "General Plan",
+          planId: task._id,
+          subject: task.stream || "General",
           currentChapter: {
-            title: chapter?.title,
-            number: chapter?.weekNumber,
+            title: task.chapterTitle || "Chapter",
+            number: task.order || 1,
           },
           currentTopic: {
-            title: String(topicTitle || "").trim(),
+            title: String(task.topic || "").trim(),
           },
-          totalChapters: weeks.length,
-          progressPercent: weeks.length > 0 ? Math.round(((progress.currentChapterIndex + 1) / weeks.length) * 100) : 0,
-          isCompleted: progress.isCompleted,
+          totalChapters: flows.length,
+          progressPercent: flows.length > 0 ? Math.round((completedCount / flows.length) * 100) : 0,
+          isCompleted: isCompleted,
         },
       });
     } catch (error) {
@@ -114,10 +118,10 @@ export const createStudyController = ({ openai, openAiModel } = {}) => {
   const internalCompleteTopic = async (req, res) => {
     try {
       const { userId } = req.body;
-      const progress = await completeCurrentTopic(userId);
-      res.status(200).json({ ok: true, data: progress });
+      const flows = await completeCurrentTask(userId);
+      res.status(200).json({ ok: true, data: flows });
     } catch (error) {
-      console.error("Internal error completing topic:", error);
+      console.error("Internal error completing task:", error);
       res.status(500).json({ ok: false, message: error.message });
     }
   };
