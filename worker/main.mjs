@@ -731,6 +731,14 @@ export default defineAgent({
         isLastQuestion: false,
       });
 
+      void storeConversationMessageInternally({
+        userId,
+        roomName: ctx.room?.name || "",
+        role: "assistant",
+        text: welcomeGreeting,
+        speechId: aiSpeechId,
+      });
+
       await session.say(welcomeGreeting);
     } catch (error) {
       console.warn("[AGENT] Skipped initial greeting because session is no longer running:", error?.message || error);
