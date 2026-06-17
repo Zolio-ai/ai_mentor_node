@@ -15,6 +15,7 @@ import { registerAttendanceRoutes } from "./src/routes/registerAttendanceRoutes.
 import { registerParsingRoutes } from "./src/routes/registerParsingRoutes.mjs";
 import { registerStudyRoutes } from "./src/routes/registerStudyRoutes.mjs";
 import { registerTaskRoutes } from "./src/routes/registerTaskRoutes.mjs";
+import { registerAssignmentRoutes } from "./src/routes/registerAssignmentRoutes.mjs";
 import { registerSocketHandlers } from "./src/socket/registerSocketHandlers.mjs";
 
 dotenv.config();
@@ -101,7 +102,7 @@ async function connectDatabase() {
   console.log("MongoDB connected.");
 }
 
-const { verifyHttpAuth, verifyAdminAuth } = createAuthMiddleware(jwtSecret);
+const { verifyHttpAuth, verifyAdminAuth, verifyTeacherAuth } = createAuthMiddleware(jwtSecret);
 
 app.get("/health", (_req, res) => {
   res.json({ status: "ok" });
@@ -160,6 +161,11 @@ registerTaskRoutes(app, {
   verifyHttpAuth,
   openai,
   openAiModel,
+});
+
+registerAssignmentRoutes(app, {
+  verifyHttpAuth,
+  verifyTeacherAuth,
 });
 
 registerSocketHandlers(io, {

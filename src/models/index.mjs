@@ -22,6 +22,7 @@ const userSchema = new mongoose.Schema(
     otp: { type: String, default: null },
     otpExpires: { type: Date, default: null },
     isVerified: { type: Boolean, default: false },
+    role: { type: String, enum: ["student", "teacher", "admin"], default: "student" },
   },
   { timestamps: true },
 );
@@ -215,3 +216,30 @@ const taskFlowSchema = new mongoose.Schema(
 
 export const Task = mongoose.model("Task", taskSchema);
 export const TaskFlow = mongoose.model("TaskFlow", taskFlowSchema);
+
+const assignmentSchema = new mongoose.Schema(
+  {
+    title: { type: String, required: true, trim: true },
+    description: { type: String, required: true },
+    dueDate: { type: Date, required: true, default: null },
+    studyPlanId: {type: mongoose.Schema.Types.ObjectId, ref: "StudyPlan", required: true, index: true },
+    weekNumber: { type: Number, required: true },  
+  },
+  { timestamps: true },
+);
+
+const assignmentSubmissionSchema = new mongoose.Schema(
+  {
+    assignmentId: { type: mongoose.Schema.Types.ObjectId, ref: "Assignment", required: true },
+    studentId: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true, index: true },
+    content: { type: String, default: "" },
+    status: { type: String, enum: ["pending", "submitted", "graded"], default: "pending" },
+    teacherVisibility: { type: Boolean, default: false },
+    feedback: { type: String, default: "" },
+    grade: { type: Number, required: true },
+  },
+  { timestamps: true },
+);
+
+export const Assignment = mongoose.model("Assignment", assignmentSchema);
+export const AssignmentSubmission = mongoose.model("AssignmentSubmission", assignmentSubmissionSchema);
